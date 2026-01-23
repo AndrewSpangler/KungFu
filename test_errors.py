@@ -332,10 +332,10 @@ def main():
     demo.destroy()
     
     if success:
-        print("\n✅ All tests completed successfully!")
+        print("\nAll tests completed successfully!")
         return 0
     else:
-        print("\n❌ Some tests failed!")
+        print("\nSome tests failed!")
         return 1
 
 if __name__ == "__main__":
