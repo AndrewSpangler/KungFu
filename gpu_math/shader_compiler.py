@@ -1,34 +1,24 @@
 from typing import Dict, List
 from .composition import create_shader, STANDARD_HEADING, _buff_line
-from .gl_typing import GLTypes, NP_GLTypes, GLSL_TO_NP
+from .gl_typing import GLTypes, NP_GLTypes, GLSL_TO_NP, TypeRules
 from .compute_graph import ComputeGraph
 
 class ShaderCompiler:
-    TYPE_HIERARCHY = {
-        'bool': 0, 'int': 1, 'uint': 2, 'float': 3, 'double': 4
-    }
-    
-    TYPE_PROMOTION_MATRIX = {
-        ('bool', 'bool'): 'bool', ('bool', 'int'): 'int',
-        ('bool', 'uint'): 'uint', ('bool', 'float'): 'float',
-        ('bool', 'double'): 'double', ('int', 'int'): 'int',
-        ('int', 'uint'): 'int', ('int', 'float'): 'float',
-        ('int', 'double'): 'double', ('uint', 'uint'): 'uint',
-        ('uint', 'float'): 'float', ('uint', 'double'): 'double',
-        ('float', 'float'): 'float', ('float', 'double'): 'double',
-        ('double', 'double'): 'double',
-    }
     
     OP_TO_GLSL = {
         'add': lambda inputs: f"({' + '.join(inputs)})",
         'sub': lambda inputs: f"({inputs[0]} - {inputs[1]})",
-        'mult': lambda inputs: f"({' * '.join(inputs)})",
+        'mult': lambda inputs: f"({' * '.join(inputs)})",  # Removed self reference
         'div': lambda inputs: f"({inputs[0]} / {inputs[1]})",
+        'floordiv': lambda inputs: f"int(floor(float({inputs[0]}) / float({inputs[1]})))",
         'neg': lambda inputs: f"(-{inputs[0]})",
         'square': lambda inputs: f"({inputs[0]} * {inputs[0]})",
         'gt': lambda inputs: f"({inputs[0]} > {inputs[1]})",
         'lt': lambda inputs: f"({inputs[0]} < {inputs[1]})",
         'eq': lambda inputs: f"({inputs[0]} == {inputs[1]})",
+        'gte': lambda inputs: f"({inputs[0]} >= {inputs[1]})",
+        'lte': lambda inputs: f"({inputs[0]} <= {inputs[1]})",
+        'neq': lambda inputs: f"({inputs[0]} != {inputs[1]})",
         'and': lambda inputs: f"({inputs[0]} & {inputs[1]})",
         'or': lambda inputs: f"({inputs[0]} | {inputs[1]})",
         'xor': lambda inputs: f"({inputs[0]} ^ {inputs[1]})",
@@ -52,7 +42,12 @@ class ShaderCompiler:
         'pow': lambda inputs: f"pow({inputs[0]}, {inputs[1]})",
         'min': lambda inputs: f"min({inputs[0]}, {inputs[1]})",
         'max': lambda inputs: f"max({inputs[0]}, {inputs[1]})",
+        'mix': lambda inputs: f"mix({inputs[0]}, {inputs[1]}, {inputs[2]})",
+        'step': lambda inputs: f"step({inputs[0]}, {inputs[1]})",
+        'smoothstep': lambda inputs: f"smoothstep({inputs[0]}, {inputs[1]}, {inputs[2]})",
         'cast': lambda inputs: f"{inputs[1]}({inputs[0]})",
+        'bool_not': lambda inputs: f"(!{inputs[0]})",
+        'bitwise_not': lambda inputs: f"(~{inputs[0]})",
         'bitwise_and': lambda inputs: f"({inputs[0]} & {inputs[1]})",
         'bitwise_or': lambda inputs: f"({inputs[0]} | {inputs[1]})",
         'bitwise_xor': lambda inputs: f"({inputs[0]} ^ {inputs[1]})",
@@ -63,9 +58,14 @@ class ShaderCompiler:
         'ceil': lambda inputs: f"ceil({inputs[0]})",
         'fract': lambda inputs: f"fract({inputs[0]})",
         'round': lambda inputs: f"round({inputs[0]})",
-        'step': lambda inputs: f"step({inputs[0]}, {inputs[1]})",
-        'smoothstep': lambda inputs: f"smoothstep({inputs[0]}, {inputs[1]}, {inputs[2]})",
-        'assign': lambda inputs: f"{inputs[0]} = {inputs[1]}",
+        'subscript': lambda inputs: f"{inputs[0]}[int({inputs[1]})]",  # Fixed
+        'subscript_2d': lambda inputs: f"{inputs[0]}[int({inputs[1]})][int({inputs[2]})]",  # Fixed
+        'swizzle': lambda inputs: f"{inputs[0]}.{inputs[1]}",
+        'subscript_assign': lambda inputs: f"{inputs[0]}[int({inputs[1]})] = {inputs[2]}",
+        'subscript_assign_2d': lambda inputs: f"{inputs[0]}[int({inputs[1]})][int({inputs[2]})] = {inputs[3]}",
+        'array_decl': lambda inputs: None,  # Just declaration, no expression
+        'array_init': lambda inputs: None,  # Initialization handled separately
+        'array_init_expr': lambda inputs: None,  # Array fill with expression
     }
     
     def __init__(self, graph: ComputeGraph, input_types: Dict[str, str], explicit_types: Dict[str, str] = None):
@@ -77,7 +77,12 @@ class ShaderCompiler:
         self.declared_vars = set()
         self.declared_vars.update(graph.input_vars)
         self.declared_vars.update(graph.uniform_vars)
-    
+        # Mark 'gid' as pre-declared since it's defined in the shader header
+        self.declared_vars.add('gid')
+        self.var_types['gid'] = 'int'
+        self.temp_to_final_map = {}
+        self.operation_expressions = {}
+        
     def _is_literal(self, val: str) -> bool:
         try:
             float(val)
@@ -100,57 +105,106 @@ class ShaderCompiler:
             else:
                 try:
                     val = int(var_name)
-                    return 'int' if val < 0 else 'uint'
+                    # Default to int for integer literals, not uint
+                    return 'int'
                 except ValueError:
                     return 'float'
         return 'float'
 
     def promote_types(self, type1: str, type2: str) -> str:
-        type1 = type1.lower()
-        type2 = type2.lower()
-        
-        if type1 == type2:
-            return type1
-        
-        key = tuple(sorted([type1, type2]))
-        if key in self.TYPE_PROMOTION_MATRIX:
-            return self.TYPE_PROMOTION_MATRIX[key]
-        
-        rank1 = self.TYPE_HIERARCHY.get(type1, 3)
-        rank2 = self.TYPE_HIERARCHY.get(type2, 3)
-        return type1 if rank1 > rank2 else type2
+        return TypeRules.promote_types(type1, type2)
 
     def infer_type(self, op_name: str, input_vars: List[str]) -> str:
         input_types = [self._get_var_type(v) for v in input_vars]
+        return TypeRules.infer_operator_type(op_name, input_types)
+    
+    def _optimize_direct_assignments(self, steps):
+        """Optimize steps by eliminating unnecessary temporary variables"""
+        var_replacements = {}
         
-        if op_name in ['gt', 'lt', 'eq', 'gte', 'lte', 'is_zero']:
-            return 'bool'
+        # Pass 1: Collect replacements recursively from all scopes
+        def collect_replacements(steps_list):
+            for step in steps_list:
+                if step['type'] == 'operation' and step['op_name'] == 'direct_assign':
+                    # ONLY optimize direct_assign, NEVER subscript_assign or subscript_assign_2d
+                    temp_var = step['inputs'][0]
+                    final_var = step['inputs'][1]
+                    var_replacements[temp_var] = final_var
+                    
+                    if self.graph.output_var == temp_var:
+                        self.graph.output_var = final_var
+                
+                elif step['type'] == 'loop' and 'body' in step:
+                    collect_replacements(step['body'])
         
-        if op_name in ['and', 'or', 'xor', 'lsh', 'rsh']:
-            if input_types and input_types[0] in ['int', 'uint']:
-                return 'uint' if input_types[0] == 'uint' else 'int'
-            return 'bool'
+        collect_replacements(steps)
         
-        if op_name in ['bool']:
-            return 'bool'
-        
-        if op_name in ['div', 'avg', 'sqrt', 'sin', 'cos', 'tan', 'asin', 'acos', 'atan',
-                       'exp', 'log', 'pow', 'floor', 'ceil', 'fract', 'round',
-                       'mix', 'step', 'smoothstep']:
-            return 'float'
-        
-        if op_name == 'mod':
-            if all(t in ['int', 'uint'] for t in input_types):
-                return input_types[0]
-            return 'int'
-        
-        result_type = input_types[0] if input_types else 'float'
-        for t in input_types[1:]:
-            result_type = self.promote_types(result_type, t)
-        
-        return result_type
+        # Pass 2: Filter out direct_assign ops and apply replacements recursively
+        def filter_and_replace(steps_list):
+            new_steps = []
+            for step in steps_list:
+                if step['type'] == 'operation':
+                    if step['op_name'] == 'direct_assign':
+                        continue  # Remove this operation entirely
+                    
+                    # Create new step with replaced variables
+                    new_step = step.copy()
+                    
+                    # Replace inputs
+                    new_step['inputs'] = [var_replacements.get(v, v) for v in step['inputs']]
+                    
+                    # Replace output variable
+                    if new_step['output_var'] in var_replacements:
+                        new_step['output_var'] = var_replacements[new_step['output_var']]
+                    
+                    new_steps.append(new_step)
+                    
+                elif step['type'] == 'loop':
+                    # Handle loop/if/while structures
+                    new_step = step.copy()
+                    
+                    # Recursively process the body
+                    if 'body' in new_step:
+                        new_step['body'] = filter_and_replace(new_step['body'])
+                    
+                    # Also apply replacements to loop control variables/conditions
+                    if 'loop_info' in new_step:
+                        new_info = new_step['loop_info'].copy()
+                        keys_to_check = ['start', 'end', 'step', 'test', 'condition']
+                        for key in keys_to_check:
+                            if key in new_info:
+                                val = new_info[key]
+                                if isinstance(val, str) and val in var_replacements:
+                                    new_info[key] = var_replacements[val]
+                        new_step['loop_info'] = new_info
+                        
+                    new_steps.append(new_step)
+            
+            return new_steps
+            
+        return filter_and_replace(steps)
 
     def compile(self):
+        # First, optimize the graph to eliminate unnecessary temporaries
+        self.graph.steps = self._optimize_direct_assignments(self.graph.steps)
+        
+        # Generate static constant declarations
+        static_constant_defs = []
+        for name, glsl_type, size, values in self.graph.static_constants:
+            # Format values
+            if glsl_type == 'vec2':
+                formatted_values = [f"vec2({v[0]}, {v[1]})" for v in values]
+            elif glsl_type == 'vec3':
+                formatted_values = [f"vec3({v[0]}, {v[1]}, {v[2]})" for v in values]
+            elif glsl_type == 'vec4':
+                formatted_values = [f"vec4({v[0]}, {v[1]}, {v[2]}, {v[3]})" for v in values]
+            else:
+                formatted_values = [str(v) for v in values]
+            
+            values_str = ", ".join(formatted_values)
+            const_def = f"const {glsl_type} {name}[{size}] = {glsl_type}[{size}]({values_str});"
+            static_constant_defs.append(const_def)
+        
         glsl_function_defs = []
         for func_info in self.graph.glsl_functions:
             name = func_info['name']
@@ -201,11 +255,21 @@ class ShaderCompiler:
         buffer_count = 0
         for var in sorted(self.graph.input_vars):
             var_type = self.input_types.get(var, 'float')
+            storage = self.graph.storage_hints.get(var, 'buffer')
             self.var_types[var] = var_type
-            buffer_inputs.append((buffer_count, var, var_type))
-            buffers.append(_buff_line(buffer_count, f"D{buffer_count}", f"data_{buffer_count}", var_type))
-            assignments.append(f"\n\t{var_type} {var} = data_{buffer_count}[gid];")
-            buffer_count += 1
+            
+            if storage == 'array':
+                # Non-indexed buffer - no automatic [gid] access
+                buffer_inputs.append((buffer_count, var, var_type))
+                buffers.append(_buff_line(buffer_count, f"D{buffer_count}", var, var_type))
+                self.declared_vars.add(var)  # Mark as declared (it's the buffer name itself)
+                buffer_count += 1
+            else:
+                # Vectorized buffer - automatic [gid] access
+                buffer_inputs.append((buffer_count, var, var_type))
+                buffers.append(_buff_line(buffer_count, f"D{buffer_count}", f"data_{buffer_count}", var_type))
+                assignments.append(f"\n\t{var_type} {var} = data_{buffer_count}[gid];")
+                buffer_count += 1
         
         for var in sorted(self.graph.uniform_vars):
             var_type = self.input_types.get(var, 'float')
@@ -236,6 +300,10 @@ class ShaderCompiler:
         
         code_parts = [STANDARD_HEADING]
         
+        if static_constant_defs:
+            code_parts.extend(static_constant_defs)
+            code_parts.append("")
+        
         if uniforms:
             code_parts.extend(uniforms)
         
@@ -247,7 +315,7 @@ class ShaderCompiler:
         
         code_parts.append(f"""
 void main() {{
-\tuint gid = gl_GlobalInvocationID.x;
+\tint gid = int(gl_GlobalInvocationID.x);
 \tif(gid >= nItems) return;
 \t{''.join(assignments)}
 }}""")
@@ -262,18 +330,120 @@ void main() {{
             result_type = 'void'
         
         return code, result_type
-    
+        
     def _process_loop_step(self, step: Dict, assignments: List[str], indent_level: int):
         indent = "\t" * indent_level
-        loop_info = step['loop_info']
+        loop_info = step.get('loop_info', {})
         
-        if loop_info['type'] == 'for':
+        if loop_info.get('type') == 'if':
+            condition = loop_info['condition']
+            assignments.append(f"\n{indent}if({condition}) {{")
+            
+            # Process then body
+            body_indent = indent_level + 1
+            then_body = step.get('then_body', [])
+            if not then_body and 'then_body' in loop_info:
+                then_body = loop_info['then_body']
+            
+            for body_step in then_body:
+                if isinstance(body_step, dict):
+                    if body_step['type'] == 'operation':
+                        op_name = body_step['op_name']
+                        inputs = body_step['inputs']
+                        output_var = body_step.get('output_var')
+                        
+                        # Check if this is an assignment operation within if block
+                        if op_name == 'assign':
+                            target_var = inputs[0]
+                            value_var = inputs[1]
+                            assignments.append(f"\n{indent}\t{target_var} = {value_var};")
+                        elif op_name == 'subscript_assign':
+                            array_var = inputs[0]
+                            index_var = inputs[1]
+                            value_var = inputs[2]
+                            assignments.append(f"\n{indent}\t{array_var}[{index_var}] = {value_var};")
+                        elif op_name == 'subscript_assign_2d':
+                            array_var = inputs[0]
+                            index1_var = inputs[1]
+                            index2_var = inputs[2]
+                            value_var = inputs[3]
+                            assignments.append(f"\n{indent}\t{array_var}[{index1_var}][{index2_var}] = {value_var};")
+                        elif op_name == 'expression_result':
+                            # Just output the expression as a statement
+                            if inputs:
+                                assignments.append(f"\n{indent}\t{inputs[0]};")
+                        else:
+                            self._process_operation(op_name, inputs, output_var, assignments, body_indent)
+                    elif body_step['type'] == 'loop':
+                        self._process_loop_step(body_step, assignments, body_indent)
+            
+            assignments.append(f"\n{indent}}}")
+            
+            # Process else body if exists
+            else_body = step.get('else_body', [])
+            if not else_body and 'else_body' in loop_info and loop_info['else_body']:
+                else_body = loop_info['else_body']
+            
+            if else_body:
+                assignments.append(f"\n{indent}else {{")
+                
+                for body_step in else_body:
+                    if isinstance(body_step, dict):
+                        if body_step['type'] == 'operation':
+                            op_name = body_step['op_name']
+                            inputs = body_step['inputs']
+                            output_var = body_step.get('output_var')
+                            
+                            if op_name == 'assign':
+                                target_var = inputs[0]
+                                value_var = inputs[1]
+                                assignments.append(f"\n{indent}\t{target_var} = {value_var};")
+                            elif op_name == 'subscript_assign':
+                                array_var = inputs[0]
+                                index_var = inputs[1]
+                                value_var = inputs[2]
+                                assignments.append(f"\n{indent}\t{array_var}[{index_var}] = {value_var};")
+                            elif op_name == 'subscript_assign_2d':
+                                array_var = inputs[0]
+                                index1_var = inputs[1]
+                                index2_var = inputs[2]
+                                value_var = inputs[3]
+                                assignments.append(f"\n{indent}\t{array_var}[{index1_var}][{index2_var}] = {value_var};")
+                            elif op_name == 'expression_result':
+                                if inputs:
+                                    assignments.append(f"\n{indent}\t{inputs[0]};")
+                            else:
+                                self._process_operation(op_name, inputs, output_var, assignments, body_indent)
+                        elif body_step['type'] == 'loop':
+                            self._process_loop_step(body_step, assignments, body_indent)
+                
+                assignments.append(f"\n{indent}}}")
+            
+            return
+        
+        elif loop_info.get('type') == 'for':
             loop_var = loop_info['var']
             start = loop_info['start']
             end = loop_info['end']
             step_val = loop_info.get('step', '1')
+            is_dynamic = loop_info.get('dynamic', False)
             
-            assignments.append(f"\n{indent}for(int {loop_var} = {start}; {loop_var} < {end}; {loop_var} += {step_val}) {{")
+            # Handle dynamic bounds by ensuring proper type casting
+            if is_dynamic:
+                # For dynamic bounds, we need to ensure they're integers
+                start_expr = f"int({start})" if not self._is_literal(start) and not start.endswith('u') else start
+                end_expr = f"int({end})" if not self._is_literal(end) and not end.endswith('u') else end
+                step_expr = f"int({step_val})" if not self._is_literal(step_val) and not step_val.endswith('u') else step_val
+            else:
+                start_expr = start
+                end_expr = end
+                step_expr = step_val
+            
+            assignments.append(f"\n{indent}for(int {loop_var} = {start_expr}; {loop_var} < {end_expr}; {loop_var} += {step_expr}) {{")
+            
+            # Track the loop variable type
+            self.var_types[loop_var] = 'int'
+            self.declared_vars.add(loop_var)
             
             body_indent = indent_level + 1
             for body_step in step.get('body', []):
@@ -286,12 +456,146 @@ void main() {{
                     self._process_loop_step(body_step, assignments, body_indent)
             
             assignments.append(f"\n{indent}}}")
+        elif loop_info.get('type') == 'while':
+            test = loop_info['test']
+            assignments.append(f"\n{indent}while({test}) {{")
+            
+            body_indent = indent_level + 1
+            for body_step in step.get('body', []):
+                if body_step['type'] == 'operation':
+                    op_name = body_step['op_name']
+                    inputs = body_step['inputs']
+                    output_var = body_step['output_var']
+                    self._process_operation(op_name, inputs, output_var, assignments, body_indent)
+            
+            assignments.append(f"\n{indent}}}")
     
-    def _process_operation(self, op_name: str, inputs: List[str], output_var: str, 
-                      assignments: List[str], indent_level: int):
+    def _process_operation(
+        self, op_name: str, inputs: List[str], output_var: str, 
+        assignments: List[str], indent_level: int
+    ):
         indent = "\t" * indent_level
         
-        if op_name == 'cast':
+        if op_name == 'array_decl':
+            array_name = inputs[0]
+            element_type = inputs[1]
+            array_dims = inputs[2:]
+            
+            # Build type string with dimensions
+            full_type = element_type
+            for dim in array_dims:
+                full_type += f"[{dim}]"
+            
+            self.var_types[array_name] = full_type
+            self.explicit_types[array_name] = full_type
+            
+            if array_name not in self.declared_vars:
+                # Generate declaration like: float temp_array[16][18];
+                dim_str = ''.join(f"[{dim}]" for dim in array_dims)
+                assignments.append(f"\n{indent}{element_type} {array_name}{dim_str};")
+                self.declared_vars.add(array_name)
+        
+        elif op_name == 'array_init':
+            array_name = inputs[0]
+            element_type = inputs[1]
+            array_dims = inputs[2:-len(inputs[2:])]  # All but the last elements are dimensions
+            values = inputs[2 + len(array_dims):]  # Values come after dimensions
+            
+            full_type = element_type
+            for dim in array_dims:
+                full_type += f"[{dim}]"
+            
+            self.var_types[array_name] = full_type
+            self.explicit_types[array_name] = full_type
+            
+            if array_name not in self.declared_vars:
+                # For simplicity, we'll initialize with zeros for now
+                # For complex initialization, we'd need to generate nested loops
+                total_elements = 1
+                for dim in array_dims:
+                    if self._is_literal(dim):
+                        total_elements *= int(float(dim))
+                    else:
+                        # Dynamic size - can't precompute
+                        total_elements = -1
+                        break
+                
+                if total_elements > 0 and total_elements == len(values):
+                    # Static size with explicit values
+                    values_str = ', '.join(values)
+                    dim_str = ''.join(f"[{dim}]" for dim in array_dims)
+                    assignments.append(f"\n{indent}{element_type} {array_name}{dim_str} = {element_type}{dim_str}({values_str});")
+                else:
+                    # Dynamic size or mismatched values - use loops
+                    dim_str = ''.join(f"[{dim}]" for dim in array_dims)
+                    assignments.append(f"\n{indent}{element_type} {array_name}{dim_str};")
+                    # TODO: Add initialization loops
+                
+                self.declared_vars.add(array_name)
+        
+        elif op_name == 'array_init_expr':
+            array_name = inputs[0]
+            element_type = inputs[1]
+            array_dims = inputs[2:-1]  # All but last two
+            init_expr = inputs[-1]
+            
+            full_type = element_type
+            for dim in array_dims:
+                full_type += f"[{dim}]"
+            
+            self.var_types[array_name] = full_type
+            self.explicit_types[array_name] = full_type
+            
+            if array_name not in self.declared_vars:
+                # For filling array with expression, we need loops
+                dim_str = ''.join(f"[{dim}]" for dim in array_dims)
+                assignments.append(f"\n{indent}{element_type} {array_name}{dim_str};")
+                
+                # Generate initialization loops
+                if len(array_dims) == 1:
+                    # 1D array
+                    loop_var = "i"
+                    assignments.append(f"\n{indent}for(int {loop_var} = 0; {loop_var} < {array_dims[0]}; {loop_var}++) {{")
+                    assignments.append(f"\n{indent}\t{array_name}[{loop_var}] = {init_expr};")
+                    assignments.append(f"\n{indent}}}")
+                elif len(array_dims) == 2:
+                    # 2D array
+                    assignments.append(f"\n{indent}for(int i = 0; i < {array_dims[0]}; i++) {{")
+                    assignments.append(f"\n{indent}\tfor(int j = 0; j < {array_dims[1]}; j++) {{")
+                    assignments.append(f"\n{indent}\t\t{array_name}[i][j] = {init_expr};")
+                    assignments.append(f"\n{indent}\t}}")
+                    assignments.append(f"\n{indent}}}")
+                
+                self.declared_vars.add(array_name)
+        
+        elif op_name == 'subscript_assign':
+            array_var = inputs[0]
+            index_var = inputs[1]
+            value_var = inputs[2]
+            
+            # Ensure index is int for GLSL
+            if self._is_literal(index_var) and index_var.endswith('u'):
+                index_var = f"int({index_var[:-1]})"
+            
+            assignments.append(f"\n{indent}{array_var}[{index_var}] = {value_var};")
+            return  # Return early to avoid processing as regular operation
+        
+        elif op_name == 'subscript_assign_2d':
+            array_var = inputs[0]
+            index1_var = inputs[1]
+            index2_var = inputs[2]
+            value_var = inputs[3]
+            
+            # Ensure indices are int for GLSL
+            if self._is_literal(index1_var) and index1_var.endswith('u'):
+                index1_var = f"int({index1_var[:-1]})"
+            if self._is_literal(index2_var) and index2_var.endswith('u'):
+                index2_var = f"int({index2_var[:-1]})"
+            
+            assignments.append(f"\n{indent}{array_var}[{index1_var}][{index2_var}] = {value_var};")
+            return  # Return early to avoid processing as regular operation
+        
+        elif op_name == 'cast':
             target_type = inputs[1]
             source_var = inputs[0]
             source_type = self._get_var_type(source_var)
@@ -302,8 +606,16 @@ void main() {{
             else:
                 expr = source_var
             
+            if output_var == "_void_":
+                # Just output the expression as a statement
+                assignments.append(f"\n{indent}{expr};")
+                return
+
+            # Define out_type here
+            out_type = target_type
+            
             if output_var not in self.declared_vars:
-                assignments.append(f"\n{indent}{target_type} {output_var} = {expr};")
+                assignments.append(f"\n{indent}{out_type} {output_var} = {expr};")
                 self.declared_vars.add(output_var)
             else:
                 assignments.append(f"\n{indent}{output_var} = {expr};")
@@ -327,10 +639,11 @@ void main() {{
                 self.declared_vars.add(target_var)
             else:
                 assignments.append(f"\n{indent}{target_var} = {expr};")
-                
+                    
+            # Store the output_var type if different from target_var
             if output_var and output_var != target_var:
                 self.var_types[output_var] = target_type
-                
+                    
         elif any(f['name'] == op_name for f in self.graph.glsl_functions):
             out_type = 'float'
             self.var_types[output_var] = out_type
@@ -348,16 +661,48 @@ void main() {{
             for inp in inputs:
                 inp_type = self._get_var_type(inp)
                 if self._is_literal(inp):
-                    if inp_type == 'float' and '.' not in inp and 'e' not in inp.lower():
+                    # For array subscript operations, ensure indices are int not uint
+                    if op_name in ['subscript', 'subscript_2d'] and inp in inputs[1:]:  # indices are after the array
+                        # Force integer literals for array indices
+                        if inp.endswith('u'):
+                            processed_inputs.append(f"int({inp[:-1]})")
+                        else:
+                            processed_inputs.append(f"int({inp})")
+                    elif inp_type == 'float' and '.' not in inp and 'e' not in inp.lower():
                         processed_inputs.append(f"{inp}.0")
                     elif inp_type == 'uint' and not inp.startswith('-'):
-                        processed_inputs.append(f"{inp}u")
+                        # Handle uint literals - only add 'u' suffix if needed
+                        # For operations that mix int and uint, prefer int
+                        other_inputs_have_int = any(
+                            self._get_var_type(other) == 'int' 
+                            for other in inputs 
+                            if other != inp
+                        )
+                        if other_inputs_have_int or op_name in ['add', 'sub', 'mult', 'div', 'mod', 'floordiv']:
+                            # Convert to int for mixed operations
+                            processed_inputs.append(f"int({inp})")
+                        else:
+                            processed_inputs.append(f"{inp}u")
                     elif inp_type == 'int' and inp.startswith('-'):
                         processed_inputs.append(f"{inp}")
                     else:
                         processed_inputs.append(inp)
                 else:
-                    processed_inputs.append(inp)
+                    # Handle non-literal variables
+                    if inp_type == 'uint':
+                        # Check if any other input is int
+                        other_inputs_have_int = any(
+                            self._get_var_type(other) == 'int' 
+                            for other in inputs 
+                            if other != inp
+                        )
+                        if other_inputs_have_int or op_name in ['add', 'sub', 'mult', 'div', 'mod', 'floordiv', 'and', 'or', 'xor']:
+                            # Cast uint to int for mixed or bitwise operations
+                            processed_inputs.append(f"int({inp})")
+                        else:
+                            processed_inputs.append(inp)
+                    else:
+                        processed_inputs.append(inp)
             
             expr = self.OP_TO_GLSL.get(op_name, lambda x: f"{op_name}({', '.join(x)})")(processed_inputs)
             

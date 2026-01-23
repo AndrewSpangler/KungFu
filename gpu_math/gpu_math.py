@@ -109,16 +109,27 @@ class GPUMath:
             return self.fetch(CastBuffer(result_buffer, n_items, cast=res_dtype))
 
     def compile_fused(self, func, debug=False):
-        if not hasattr(func, '_compute_graph'):
+        import inspect
+        
+        # Handle bound methods by getting the underlying function
+        is_method = inspect.ismethod(func)
+        actual_func = func.__func__ if is_method else func
+        
+        if not hasattr(actual_func, '_compute_graph') and not hasattr(actual_func, '_needs_transpilation'):
             raise ValueError("Function must be decorated with @gpu_kernel")
         
-        graph = func._compute_graph
-        arg_names = func._arg_names
-        type_hints = getattr(func, '_type_hints', {})
-        storage_hints = getattr(func, '_storage_hints', {})
-        explicit_types = getattr(func, '_explicit_types', {})
+        # Transpile if not already done (For kernels wrapped in static_constant decorators)
+        if getattr(actual_func, '_needs_transpilation', False):
+            from .graph_compiler import _transpile_kernel
+            _transpile_kernel(func)
         
-        cache_key = (func.__name__, id(graph))
+        graph = actual_func._compute_graph
+        arg_names = actual_func._arg_names
+        type_hints = getattr(actual_func, '_type_hints', {})
+        storage_hints = getattr(actual_func, '_storage_hints', {})
+        explicit_types = getattr(actual_func, '_explicit_types', {})
+        
+        cache_key = (actual_func.__name__, id(graph))
         
         if cache_key not in self.fused_cache:
             input_types = {name: type_hints.get(name, 'float') for name in arg_names}
@@ -128,14 +139,9 @@ class GPUMath:
             
             if 'res' in type_hints:
                 res_type = type_hints['res']
-            
-            if debug:
-                print("Generated GLSL code:")
-                print(code)
-                print(f"Result type: {res_type}")
-            
+                        
             shader = Shader.make_compute(Shader.SL_GLSL, code)
-            node = NodePath(ComputeNode(f"fused_{func.__name__}"))
+            node = NodePath(ComputeNode(f"fused_{actual_func.__name__}"))
             node.set_shader(shader)
             
             if res_type != 'void':
@@ -146,31 +152,53 @@ class GPUMath:
         
         node, arg_names, res_type, storage_hints = self.fused_cache[cache_key]
         
-        def executor(*args, out: Optional[Union[np.ndarray, CastBuffer]] = None, **uniform_values):
+        def executor(*args, out: Optional[Union[np.ndarray, CastBuffer]] = None, n_items: Optional[int] = None, **uniform_values):
             if len(args) != len(arg_names):
                 raise ValueError(f"Expected {len(arg_names)} arguments, got {len(args)}")
             
-            n_items = None
+            auto_n_items = None
             buffers = []
             
             for i, (arg_name, arg) in enumerate(zip(arg_names, args)):
-                if storage_hints.get(arg_name, 'buffer') == 'uniform':
+                storage = storage_hints.get(arg_name, 'buffer')
+                
+                if storage == 'uniform':
                     continue
                 
-                if isinstance(arg, CastBuffer):
-                    if n_items is None:
-                        n_items = len(arg)
-                    buffers.append((i, arg))
-                elif isinstance(arg, np.ndarray):
-                    if n_items is None:
-                        n_items = len(arg)
-                    buffers.append((i, self.push(arg)))
-                elif not isinstance(arg, (int, float, bool, np.generic, Vec2, Vec3, Vec4, LVecBase2f, LVecBase3f, LVecBase4f)):
-                    raise TypeError(f"Unsupported argument type for '{arg_name}': {type(arg)}")
+                if storage == 'array':
+                    # Array storage - no auto n_items determination, just pass buffer
+                    if isinstance(arg, CastBuffer):
+                        buffers.append((i, arg))
+                    elif isinstance(arg, np.ndarray):
+                        buffers.append((i, self.push(arg)))
+                    else:
+                        raise TypeError(f"Array parameter '{arg_name}' must be CastBuffer or numpy array, got {type(arg)}")
+                
+                elif storage == 'buffer':
+                    # Vectorized buffer storage - determine n_items from length
+                    if isinstance(arg, CastBuffer):
+                        if auto_n_items is None:
+                            auto_n_items = len(arg)
+                        buffers.append((i, arg))
+                    elif isinstance(arg, np.ndarray):
+                        if auto_n_items is None:
+                            auto_n_items = len(arg)
+                        buffers.append((i, self.push(arg)))
+                    elif not isinstance(arg, (int, float, bool, np.generic, Vec2, Vec3, Vec4, LVecBase2f, LVecBase3f, LVecBase4f)):
+                        raise TypeError(f"Unsupported argument type for '{arg_name}': {type(arg)}")
             
-            if n_items is None:
-                n_items = 1
+            # Determine actual n_items to use
+            if n_items is not None:
+                # Explicit n_items takes precedence
+                actual_n_items = n_items
+            elif auto_n_items is not None:
+                # Auto-determined from buffer lengths
+                actual_n_items = auto_n_items
+            else:
+                # No buffers and no explicit n_items - single work item
+                actual_n_items = 1
             
+            # Expand scalar arguments for vectorized buffers
             for i, (arg_name, arg) in enumerate(zip(arg_names, args)):
                 if storage_hints.get(arg_name, 'buffer') == 'buffer':
                     if any(idx == i for idx, _ in buffers):
@@ -188,9 +216,9 @@ class GPUMath:
                         
                         if res_type.startswith('vec'):
                             dim = int(res_type[3])
-                            scalar_array = np.full((n_items, dim), arg, dtype=dtype)
+                            scalar_array = np.full((actual_n_items, dim), arg, dtype=dtype)
                         else:
-                            scalar_array = np.full(n_items, arg, dtype=dtype)
+                            scalar_array = np.full(actual_n_items, arg, dtype=dtype)
                         
                         buffers.append((i, self.push(scalar_array)))
             
@@ -204,29 +232,29 @@ class GPUMath:
                     if isinstance(out, CastBuffer):
                         result_buffer = out.buffer
                     elif isinstance(out, np.ndarray):
-                        if len(out) != n_items:
+                        if len(out) != actual_n_items:
                             if res_type.startswith('vec'):
                                 dim = int(res_type[3])
-                                if len(out) != n_items * dim:
-                                    raise ValueError(f"Output array length {len(out)} doesn't match expected length {n_items * dim}")
+                                if len(out) != actual_n_items * dim:
+                                    raise ValueError(f"Output array length {len(out)} doesn't match expected length {actual_n_items * dim}")
                             else:
-                                raise ValueError(f"Output array length {len(out)} doesn't match expected length {n_items}")
+                                raise ValueError(f"Output array length {len(out)} doesn't match expected length {actual_n_items}")
                         result_buffer = self.push(out).buffer
                     else:
                         raise TypeError("out must be CastBuffer or numpy array")
                 else:
                     if res_type.startswith('vec'):
                         dim = int(res_type[3])
-                        res_size = n_items * dim * np.dtype(res_dtype).itemsize
+                        res_size = actual_n_items * dim * np.dtype(res_dtype).itemsize
                     else:
-                        res_size = n_items * np.dtype(res_dtype).itemsize
+                        res_size = actual_n_items * np.dtype(res_dtype).itemsize
                     
                     result_buffer = ShaderBuffer("DR", res_size, GeomEnums.UH_stream)
             
             for i, buf in enumerate(buffer_objects):
                 node.set_shader_input(f"D{i}", buf.buffer)
             
-            node.set_shader_input("nItems", int(n_items))
+            node.set_shader_input("nItems", int(actual_n_items))
             
             for uniform_name, uniform_value in uniform_values.items():
                 node.set_shader_input(uniform_name, uniform_value)
@@ -247,7 +275,7 @@ class GPUMath:
             
             try:
                 self.base.graphics_engine.dispatch_compute(
-                    ((n_items + 63) // 64, 1, 1),
+                    ((actual_n_items + 63) // 64, 1, 1),
                     node.get_attrib(ShaderAttrib),
                     self.base.win.get_gsg()
                 )
@@ -263,13 +291,13 @@ class GPUMath:
                 if isinstance(out, CastBuffer):
                     return out
                 else:
-                    return self.fetch(CastBuffer(result_buffer, n_items, cast=res_dtype))
+                    return self.fetch(CastBuffer(result_buffer, actual_n_items, cast=res_dtype))
             else:
                 if res_type.startswith('vec'):
                     dim = int(res_type[3])
-                    return CastBuffer(result_buffer, n_items * dim, cast=res_dtype)
+                    return CastBuffer(result_buffer, actual_n_items * dim, cast=res_dtype)
                 else:
-                    return CastBuffer(result_buffer, n_items, cast=res_dtype)
+                    return CastBuffer(result_buffer, actual_n_items, cast=res_dtype)
         
         if debug:
             print("Generated GLSL code:")

@@ -64,7 +64,7 @@ class GraphCompilationDemo(ShowBase):
         
         print(f"Compilation time: {(compile_end - compile_start) * 1000:.2f} ms")
 
-        count = 100000000
+        count = 1000000
         x = np.linspace(0, 10, count).astype(np.float32)
         y = np.linspace(0, 10, count).astype(np.float32)
         z = np.linspace(0, 10, count).astype(np.float32)
@@ -122,6 +122,211 @@ class GraphCompilationDemo(ShowBase):
         if cpu_end - cpu_start > 0:
             speedup = (cpu_end - cpu_start) / (gpu_end - gpu_start)
             print(f"Speedup (CPU/GPU): {speedup:.2f}x")
+
+    def example_dynamic_loops_and_arrays(self):
+        print("\n=== Dynamic Loops and Temporary Arrays (Simplified) ===")
+        
+        @gpu_kernel({
+            "input_data": (NP_GLTypes.float, IOTypes.buffer),
+            "window_size": (NP_GLTypes.int, IOTypes.uniform),
+            "res": (NP_GLTypes.float, IOTypes.buffer)
+        })
+        def moving_average_kernel(input_data, window_size):
+            # Create a temporary buffer for the window
+            window : float[32]  # Max window size of 32
+            
+            # Fill window with data from input_data with offset
+            for i in range(window_size):
+                window[i] = input_data * float(i + 1)
+            
+            # Compute weighted average using dynamic loop
+            sum_val : float = 0.0
+            for i in range(window_size):
+                weight = 1.0 / float(i + 1)
+                sum_val = sum_val + (window[i] * weight)
+            
+            avg = sum_val / float(window_size)
+            return avg
+        
+        @gpu_kernel({
+            "vec_a": (NP_GLTypes.float, IOTypes.buffer),
+            "vec_b": (NP_GLTypes.float, IOTypes.buffer),
+            "n": (NP_GLTypes.int, IOTypes.uniform),
+            "res": (NP_GLTypes.float, IOTypes.buffer)
+        })
+        def vector_dot_product_kernel(vec_a, vec_b, n):
+            # Create temporary arrays
+            temp_a : float[16]
+            temp_b : float[16]
+            
+            # Fill temporary arrays with transformed values
+            for i in range(n):
+                temp_a[i] = vec_a * float(i + 1)
+                temp_b[i] = vec_b * float(i + 1)
+            
+            # Compute dot product of temporary arrays
+            dot_product : float = 0.0
+            for i in range(n):
+                dot_product = dot_product + (temp_a[i] * temp_b[i])
+            
+            # Apply normalization and return
+            return dot_product / float(n)
+        
+        @gpu_kernel({
+            "matrix_a": (NP_GLTypes.float, IOTypes.buffer),
+            "matrix_b": (NP_GLTypes.float, IOTypes.buffer),
+            "size": (NP_GLTypes.int, IOTypes.uniform),
+            "res": (NP_GLTypes.float, IOTypes.buffer)
+        })
+        def matrix_operations_kernel(matrix_a, matrix_b, size):
+            # Create 2D array
+            temp_result : float[8, 8]
+            
+            # Fill 2D array with computed values
+            for i in range(size):
+                for j in range(size):
+                    value = matrix_a * float(i + 1) + matrix_b * float(j + 1)
+                    temp_result[i][j] = value
+            
+            # Compute row-wise sums
+            row_sums : float[8]
+            for i in range(size):
+                row_sum : float = 0.0
+                for j in range(size):
+                    row_sum = row_sum + temp_result[i][j]
+                row_sums[i] = row_sum
+            
+            # Compute average of row sums
+            total_sum : float = 0.0
+            for i in range(size):
+                total_sum = total_sum + row_sums[i]
+            
+            return total_sum / float(size)
+        
+        # Test moving average
+        print("\n1. Moving Average Test:")
+        compile_start = time.time()
+        compiled_avg = self.math.compile_fused(moving_average_kernel, debug=False)
+        compile_end = time.time()
+        print(f"   Compilation time: {(compile_end - compile_start) * 1000:.2f} ms")
+        
+        data = np.random.rand(10000).astype(np.float32) * 10.0
+        window_size = 5
+        
+        gpu_start = time.time()
+        result = compiled_avg(data, window_size)
+        gpu_output = self.math.fetch(result)
+        gpu_end = time.time()
+        
+        print(f"   GPU execution: {(gpu_end - gpu_start) * 1000:.2f} ms")
+        print(f"   Sample output: {gpu_output[:5]}")
+        
+        # CPU reference
+        def moving_average_cpu(input_data, window_size):
+            output = np.zeros_like(input_data)
+            for idx in range(len(input_data)):
+                weighted_sum = 0.0
+                for i in range(window_size):
+                    weight = 1.0 / float(i + 1)
+                    weighted_sum += input_data[idx] * float(i + 1) * weight
+                output[idx] = weighted_sum / float(window_size)
+            return output
+        
+        cpu_output = moving_average_cpu(data, window_size)
+        print(f"   CPU reference: {cpu_output[:5]}")
+        
+        abs_diff = np.abs(gpu_output - cpu_output)
+        max_abs_diff = np.max(abs_diff)
+        print(f"   Maximum absolute difference: {max_abs_diff:.6f}")
+        
+        # Test vector dot product
+        print("\n2. Vector Dot Product Test:")
+        compiled_dot = self.math.compile_fused(vector_dot_product_kernel, debug=False)
+        
+        vec_a = np.random.rand(5000).astype(np.float32) * 3.0
+        vec_b = np.random.rand(5000).astype(np.float32) * 3.0
+        n = 8
+        
+        result = compiled_dot(vec_a, vec_b, n)
+        dot_output = self.math.fetch(result)
+        
+        print(f"   Sample output: {dot_output[:5]}")
+        
+        # CPU reference
+        def vector_dot_product_cpu(a, b, n):
+            output = np.zeros_like(a)
+            for idx in range(len(a)):
+                temp_a = np.zeros(n)
+                temp_b = np.zeros(n)
+                
+                for i in range(n):
+                    temp_a[i] = a[idx] * float(i + 1)
+                    temp_b[i] = b[idx] * float(i + 1)
+                
+                dot_product = 0.0
+                for i in range(n):
+                    dot_product += temp_a[i] * temp_b[i]
+                
+                output[idx] = dot_product / float(n)
+            
+            return output
+        
+        cpu_dot_output = vector_dot_product_cpu(vec_a, vec_b, n)
+        print(f"   CPU reference: {cpu_dot_output[:5]}")
+        
+        abs_diff_dot = np.abs(dot_output - cpu_dot_output)
+        max_abs_diff_dot = np.max(abs_diff_dot)
+        print(f"   Maximum absolute difference: {max_abs_diff_dot:.6f}")
+        
+        # Test matrix operations
+        print("\n3. Matrix Operations Test:")
+        compiled_mat = self.math.compile_fused(matrix_operations_kernel, debug=True)
+        
+        mat_a = np.random.rand(2000).astype(np.float32) * 3.0
+        mat_b = np.random.rand(2000).astype(np.float32) * 3.0
+        size = 4
+        
+        result = compiled_mat(mat_a, mat_b, size)
+        mat_output = self.math.fetch(result)
+        
+        print(f"   Sample output: {mat_output[:5]}")
+        
+        # CPU reference
+        def matrix_operations_cpu(a, b, size):
+            output = np.zeros_like(a)
+            for idx in range(len(a)):
+                temp_result = np.zeros((size, size))
+                
+                for i in range(size):
+                    for j in range(size):
+                        temp_result[i, j] = a[idx] * float(i + 1) + b[idx] * float(j + 1)
+                
+                row_sums = np.zeros(size)
+                for i in range(size):
+                    row_sum = 0.0
+                    for j in range(size):
+                        row_sum += temp_result[i, j]
+                    row_sums[i] = row_sum
+                
+                total_sum = 0.0
+                for i in range(size):
+                    total_sum += row_sums[i]
+                
+                output[idx] = total_sum / float(size)
+            
+            return output
+        
+        cpu_mat_output = matrix_operations_cpu(mat_a, mat_b, size)
+        print(f"   CPU reference: {cpu_mat_output[:5]}")
+        
+        abs_diff_mat = np.abs(mat_output - cpu_mat_output)
+        max_abs_diff_mat = np.max(abs_diff_mat)
+        print(f"   Maximum absolute difference: {max_abs_diff_mat:.6f}")
+        
+        print("\n=== Summary ===")
+        print("Moving average:   ", "✓" if max_abs_diff < 0.001 else "✗")
+        print("Vector dot product:", "✓" if max_abs_diff_dot < 0.001 else "✗")
+        print("Matrix operations: ", "✓" if max_abs_diff_mat < 0.001 else "✗")
 
     def example_basic_kernel(self):
         print("\n=== Basic Kernel ===")
@@ -252,10 +457,11 @@ class GraphCompilationDemo(ShowBase):
         """Run all examples"""
         total_start = time.time()
         
-        # self.example_basic_kernel()
+        self.example_basic_kernel()
         self.example_complex_equation()
-        # self.example_uniforms_and_loops()
-        # self.example_void_function()
+        self.example_uniforms_and_loops()
+        self.example_void_function()
+        self.example_dynamic_loops_and_arrays()
                 
         total_end = time.time()
         

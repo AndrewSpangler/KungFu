@@ -20,6 +20,7 @@ CONFIG = {
     "square": {1: ("a * a", get_sigs(1, NUMERIC))},
     "is_zero": {1: ("a == 0", get_sigs(1, NUMERIC, "bool"))},
     "bool": {1: ("a != 0", get_sigs(1, NUMERIC, "bool"))},
+    "bool_not": {1: ("!a", get_sigs(1, ["bool"], "bool"))},
 
     "add": {
         2: ("a + b", get_sigs(2, NUMERIC)),
@@ -32,6 +33,7 @@ CONFIG = {
         3: ("a * b * c", get_sigs(3, NUMERIC))
     },
     "div": {2: ("(b != 0) ? (a / b) : 0", get_sigs(2, NUMERIC))},
+    "floordiv": {2: ("(b != 0) ? int(floor(float(a) / float(b))) : 0", get_sigs(2, NUMERIC, "int"))},
     "mod": {2: ("(b != 0) ? (a % b) : 0", get_sigs(2, INTEGRAL))},
     
     "avg": {
@@ -50,6 +52,9 @@ CONFIG = {
     "gt": {2: ("a > b", get_sigs(2, NUMERIC, "bool"))},
     "lt": {2: ("a < b", get_sigs(2, NUMERIC, "bool"))},
     "eq": {2: ("a == b", get_sigs(2, NUMERIC, "bool"))},
+    "gte": {2: ("a >= b", get_sigs(2, NUMERIC, "bool"))},
+    "lte": {2: ("a <= b", get_sigs(2, NUMERIC, "bool"))},
+    "neq": {2: ("a != b", get_sigs(2, NUMERIC, "bool"))},
 
     "clamp": {3: ("clamp(a, b, c)", get_sigs(3, ["float"]))},
 
@@ -80,4 +85,8 @@ CONFIG = {
     "mix": {3: ("mix(a, b, c)", get_sigs(3, ["float"]))},
     "step": {2: ("step(a, b)", get_sigs(2, ["float"]))},
     "smoothstep": {3: ("smoothstep(a, b, c)", get_sigs(3, ["float"]))},
+
+    # Complex number operations
+    "cmul_real": {4: ("(a * c) - (b * d)", get_sigs(4, ["float"], "float"))},
+    "cmul_imag": {4: ("(a * d) + (b * c)", get_sigs(4, ["float"], "float"))},
 }
