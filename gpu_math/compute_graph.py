@@ -13,7 +13,8 @@ class ComputeGraph:
         self.steps = []
         self.current_scope = []
         self.static_constants = []  # List of (name, type, size, values) tuples
-    
+        self.var_types = {}
+
     def add_operation(self, op_name: str, inputs: List[str], output_var: str = None, in_loop: bool = False):
         if output_var is None:
             output_var = f"_t{self.var_counter}"
@@ -23,9 +24,19 @@ class ComputeGraph:
         
         if in_loop and self.current_scope:
             current_scope = self.current_scope[-1]
-            if 'body' not in current_scope:
-                current_scope['body'] = []
-            current_scope['body'].append({
+            
+            # Determine the correct body list based on scope type
+            if current_scope['type'] == 'if':
+                body_list = current_scope['then_body']
+            elif current_scope['type'] == 'else':
+                body_list = current_scope['body']
+            else:
+                # For loops and other scopes
+                if 'body' not in current_scope:
+                    current_scope['body'] = []
+                body_list = current_scope['body']
+            
+            body_list.append({
                 'type': 'operation',
                 'op_name': op_name,
                 'inputs': inputs,
@@ -40,6 +51,7 @@ class ComputeGraph:
             })
         
         return output_var
+    
     
     def start_loop(self, loop_info: Dict):
         loop_step = {

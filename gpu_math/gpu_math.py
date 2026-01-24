@@ -1,4 +1,5 @@
 import numpy as np
+import inspect
 from typing import Dict, Optional, Union
 from panda3d.core import (
     NodePath, Shader, ShaderAttrib, ShaderBuffer,
@@ -109,8 +110,6 @@ class GPUMath:
             return self.fetch(CastBuffer(result_buffer, n_items, cast=res_dtype))
 
     def compile_fused(self, func, debug=False):
-        import inspect
-        
         # Handle bound methods by getting the underlying function
         is_method = inspect.ismethod(func)
         actual_func = func.__func__ if is_method else func
@@ -329,15 +328,40 @@ class GPUMath:
     def push(self, data):
         if not isinstance(data, np.ndarray):
             data = np.array([data])
-        sbuf = ShaderBuffer("Data", data.tobytes(), GeomEnums.UH_stream)
-        return CastBuffer(sbuf, len(data), cast=data.dtype.type)
+        
+        # Handle complex numbers as vec2
+        if data.dtype == np.complex64 or data.dtype == np.complex128:
+            # Convert complex to interleaved float32 pairs
+            data_flat = np.empty(data.size * 2, dtype=np.float32)
+            data_flat[0::2] = data.real.ravel()
+            data_flat[1::2] = data.imag.ravel()
+            sbuf = ShaderBuffer("Data", data_flat.tobytes(), GeomEnums.UH_stream)
+            return CastBuffer(sbuf, len(data), cast=np.complex64)
+        else:
+            sbuf = ShaderBuffer("Data", data.tobytes(), GeomEnums.UH_stream)
+            return CastBuffer(sbuf, len(data), cast=data.dtype.type)
 
     def fetch(self, handle):
         gsg = self.base.win.get_gsg()
         raw = self.base.graphics_engine.extract_shader_buffer_data(handle.buffer, gsg)
+        
         if handle.cast == np.bool_:
             return np.frombuffer(raw, dtype=np.int32).astype(np.bool_)
-        return np.frombuffer(raw, dtype=handle.cast)
+        elif handle.cast == np.complex64:
+            # Convert interleaved float32 pairs back to complex64
+            data = np.frombuffer(raw, dtype=np.float32)
+            result = np.empty(len(handle), dtype=np.complex64)
+            result.real = data[0::2]
+            result.imag = data[1::2]
+            return result
+        elif handle.cast == np.complex128:
+            data = np.frombuffer(raw, dtype=np.float64)
+            result = np.empty(len(handle), dtype=np.complex128)
+            result.real = data[0::2]
+            result.imag = data[1::2]
+            return result
+        else:
+            return np.frombuffer(raw, dtype=handle.cast)
 
     def _setup_headless(self):
         pipe = GraphicsPipeSelection.get_global_ptr().make_default_pipe()

@@ -3,9 +3,12 @@ import sys
 import traceback
 from typing import Dict, List, Tuple, Set, Any, Optional, Union
 from panda3d.core import Vec2, Vec3, Vec4, LVecBase2f, LVecBase3f, LVecBase4f
-from .composition import create_shader, STANDARD_HEADING, _buff_line
+from .composition import get_standard_heading, _buff_line
 from .cast_buffer import CastBuffer
-from .gl_typing import GLTypes, NP_GLTypes, Vec_GLTypes, VEC_TO_GLSL
+from .gl_typing import (
+    GLTypes, NP_GLTypes, Vec_GLTypes, VEC_TO_GLSL,
+    BUILTIN_VARIABLES, GLSL_TYPE_MAP, is_kungfu_builtin
+)
 from .compute_graph import ComputeGraph
 from .error_handler import (
     CompilationError, CompilationErrorInfo, 
@@ -15,10 +18,12 @@ from .error_handler import (
 class PythonToGLSLTranspiler(ast.NodeVisitor):
     def __init__(self, arg_names: List[str], hints: Dict[str, tuple] = None,
                  source_code: str = "", function_name: str = "", file_path: str = "",
-                 static_constants: List[Tuple[str, str, int, list]] = None):
+                 static_constants: List[Tuple[str, str, int, list]] = None,
+                 layout: Tuple[int, int, int] = (64, 1, 1)):
         self.graph = ComputeGraph()
         self.arg_names = arg_names
         self.var_map = {}
+        self.var_types = {}
         self.local_functions = {}
         self.inline_always = set()
         self.explicit_types = {}
@@ -28,6 +33,26 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
         self.file_path = file_path
         self.temp_var_usage_count = {}
         self.static_constants = static_constants or []
+        self.layout = layout
+        self.graph.layout = layout  # Store layout in graph
+        
+        # Track whether this kernel is vectorized (uses IOTypes.buffer)
+        self.has_vectorized_inputs = False
+        self.has_array_inputs = False
+        
+        # Check inputs to determine kernel type
+        for arg in arg_names:
+            hint = self.hints.get(arg, (NP_GLTypes.float, "buffer"))
+            storage = hint[1] if len(hint) > 1 else "buffer"
+            if storage == "buffer":
+                self.has_vectorized_inputs = True
+            elif storage == "array":
+                self.has_array_inputs = True
+        
+        # Add built-in variables to explicit types
+        for builtin_name, builtin_type in BUILTIN_VARIABLES.items():
+            self.explicit_types[builtin_name] = builtin_type
+            self.var_map[builtin_name] = builtin_name  # Map to itself
         
         # Add static constants to graph and make them available immediately
         if static_constants:
@@ -37,13 +62,23 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                 self.explicit_types[name] = f"{glsl_type}[{size}]"
         
         # Add function arguments to var_map
-        
         for arg in arg_names:
             hint = self.hints.get(arg, (NP_GLTypes.float, "buffer"))
             storage = hint[1] if len(hint) > 1 else "buffer"
             self.graph.add_input(arg, storage)
             self.var_map[arg] = arg
+            
+            # Check for nItems parameter in vectorized kernels
+            if arg == 'nItems' and self.has_vectorized_inputs:
+                raise CompilationError(
+                    "nItems should not be passed as a parameter to vectorized kernels. "
+                    "It's automatically available as 'n_items' or 'nItems' uniform."
+                )
     
+        self.explicit_types['vec2'] = GLTypes.vec2
+        self.explicit_types['vec3'] = GLTypes.vec3
+        self.explicit_types['vec4'] = GLTypes.vec4
+
     def _create_error(self, message: str, node: ast.AST) -> CompilationError:
         """Create a CompilationError with context"""
         error_info = create_error_context(
@@ -66,6 +101,10 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                     return 'float'
         elif var_name in self.explicit_types:
             return self.explicit_types[var_name]
+        elif var_name in BUILTIN_VARIABLES:
+            return BUILTIN_VARIABLES[var_name]
+        elif var_name in self.var_types:  # ADD THIS CHECK
+            return self.var_types[var_name]
         else:
             return 'float'
 
@@ -105,6 +144,11 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             if len(indices) == 1:
                 result = self.graph.add_operation('subscript', [array_var, indices[0]], 
                                             in_loop=bool(self.graph.current_scope))
+                # Track the type of the subscript result
+                array_type = self._get_var_type(array_var)
+                if array_type.startswith(('vec', 'uvec', 'ivec')):
+                    self.var_types[result] = array_type
+                    self.graph.var_types[result] = array_type
                 self._increment_temp_usage(result)
                 return result
             elif len(indices) == 2:
@@ -138,6 +182,23 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             if node.id == 'self':
                 return None
             
+            # Check if it's a KungFu built-in
+            if is_kungfu_builtin(node.id):
+                # For vectorized kernels with buffer inputs, gid should be automatically available
+                if node.id == 'gid' and self.has_vectorized_inputs:
+                    # In vectorized kernels, gid is gl_GlobalInvocationID.x
+                    return 'gl_GlobalInvocationID.x'
+                elif node.id == 'n_items' and self.has_vectorized_inputs:
+                    # In vectorized kernels, n_items is available as uniform
+                    return 'nItems'
+                else:
+                    # Return the GLSL expression for the built-in
+                    return get_kungfu_builtin_glsl(node.id)
+            
+            # Check if it's a built-in variable
+            if node.id in BUILTIN_VARIABLES:
+                return node.id
+            
             if node.id in self.var_map:
                 # Record that this variable is being used
                 var_name = self.var_map[node.id]
@@ -150,7 +211,7 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             raise
         except Exception as e:
             raise self._create_error(f"Error accessing variable '{node.id}': {e}", node)
-
+            
     def visit_Subscript(self, node):
         try:
             # Handle both single and multi-dimensional subscripts
@@ -169,10 +230,28 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
     def visit_Attribute(self, node):
         try:
             value = self.visit(node.value)
-            self._record_variable_use(value)
+            
+            # Handle KungFu built-in component access
+            if value in ['gl_GlobalInvocationID', 'gl_WorkGroupID', 'gl_LocalInvocationID',
+                        'gl_WorkGroupSize', 'gl_NumWorkGroups', 'gid_xyz', 'wgid', 'lid',
+                        'wg_size', 'num_wg'] or value in BUILTIN_VARIABLES:
+                # These are uvec3/ivec3 types
+                attr = node.attr
+                if attr in ['x', 'y', 'z', 'r', 'g', 'b']:
+                    return f"{value}.{attr}"
+                elif attr in ['xy', 'xyz', 'rgb']:
+                    return f"{value}.{attr}"
+            
+            # Check if value is a built-in variable
+            if value in BUILTIN_VARIABLES:
+                # Built-in variables don't need usage tracking
+                pass
+            else:
+                self._record_variable_use(value)
+            
             attr = node.attr
             
-            # Handle swizzling for vec types (.x, .y, .z, .w)
+            # Handle swizzling for vec types (.x, .y, .z, .w) and color equivalents
             if attr in ['x', 'y', 'z', 'w', 'xy', 'xyz', 'xyzw', 'rgb', 'rgba', 'r', 'g', 'b', 'a']:
                 result = self.graph.add_operation('swizzle', [value, attr], 
                                                in_loop=bool(self.graph.current_scope))
@@ -193,6 +272,12 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                 )
             
             target = node.targets[0]
+            
+            # Check if target is a built-in variable (read-only)
+            if isinstance(target, ast.Name) and target.id in BUILTIN_VARIABLES:
+                raise self._create_error(
+                    f"Cannot assign to built-in variable '{target.id}'", target
+                )
             
             # Handle Array Subscripts (like result[i][j] = sum_val)
             if isinstance(target, ast.Subscript):
@@ -221,12 +306,18 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             result_var = self.visit(node.value)
             self.var_map[target_name] = target_name
             
+            # Try to infer the type from the result
+            result_type = self._get_var_type(result_var)
+            self.var_types[target_name] = result_type  # ADD THIS LINE
+            
             # Check if we can eliminate the temporary variable
             if result_var.startswith('_t') and result_var in self.temp_var_usage_count:
                 # Check if this temp is only used here
                 if self.temp_var_usage_count.get(result_var, 0) <= 1:
                     # Replace the temp with target directly
                     self.var_map[result_var] = target_name
+                    # Store type mapping
+                    self.var_types[result_var] = result_type  # ADD THIS LINE
                     # Store special operation for compiler to handle
                     self.graph.add_operation('direct_assign', [result_var, target_name], 
                                             in_loop=bool(self.graph.current_scope))
@@ -239,7 +330,7 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             raise
         except Exception as e:
             raise self._create_error(f"Error in assignment: {e}", node)
-
+            
     def visit_AugAssign(self, node):
         try:
             if not isinstance(node.target, ast.Name):
@@ -248,6 +339,13 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                 )
             
             target = node.target.id
+            
+            # Check if target is a built-in variable (read-only)
+            if target in BUILTIN_VARIABLES:
+                raise self._create_error(
+                    f"Cannot assign to built-in variable '{target}'", node.target
+                )
+            
             left = self.visit(node.target)
             self._record_variable_use(left)
             right = self.visit(node.value)
@@ -280,7 +378,10 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
     def visit_BinOp(self, node):
         try:
             left = self.visit(node.left)
-            self._record_variable_use(left)
+            # Only track usage if not a built-in
+            if left not in BUILTIN_VARIABLES:
+                self._record_variable_use(left)
+            
             right = self.visit(node.right)
             
             if isinstance(node.op, ast.Pow):
@@ -314,7 +415,9 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
         """Handle unary operations like negation (-x), positive (+x), and bitwise not (~x)"""
         try:
             operand = self.visit(node.operand)
-            self._record_variable_use(operand)
+            # Only track usage if not a built-in
+            if operand not in BUILTIN_VARIABLES:
+                self._record_variable_use(operand)
             
             op_map = {
                 ast.USub: 'neg',      # Unary minus: -x
@@ -351,15 +454,27 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             
             args = [self.visit(arg) for arg in node.args]
             for arg in args:
-                self._record_variable_use(arg)
+                # Only track usage if not a built-in
+                if arg not in BUILTIN_VARIABLES:
+                    self._record_variable_use(arg)
             
-            if func_name in ['int', 'float', 'bool', 'uint', 'double', 'vec2', 'vec3', 'vec4']:
-                target_type = func_name
-                result = self.graph.add_operation('cast', [args[0], target_type], 
-                                               in_loop=bool(self.graph.current_scope))
-                self._increment_temp_usage(result)
-                return result
-            
+            # Check if it's a type casting function
+            if func_name in GLSL_TYPE_MAP:
+                target_type = GLSL_TYPE_MAP[func_name]
+                # Special handling for vector constructors
+                if target_type.startswith(('vec', 'uvec', 'ivec')):
+                    # This is a vector constructor
+                    result = self.graph.add_operation(target_type, args, 
+                                                    in_loop=bool(self.graph.current_scope))
+                    self._increment_temp_usage(result)
+                    return result
+                else:
+                    # Regular type cast
+                    result = self.graph.add_operation('cast', [args[0], target_type], 
+                                                    in_loop=bool(self.graph.current_scope))
+                    self._increment_temp_usage(result)
+                    return result
+                        
             if func_name in self.inline_always:
                 func_node, param_names = self.local_functions[func_name]
                 saved_var_map = self.var_map.copy()
@@ -392,12 +507,17 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
     def visit_Compare(self, node):
         try:
             left = self.visit(node.left)
-            self._record_variable_use(left)
+            # Only track usage if not a built-in
+            if left not in BUILTIN_VARIABLES:
+                self._record_variable_use(left)
+            
             comparisons = []
             
             for op, right in zip(node.ops, node.comparators):
                 right_var = self.visit(right)
-                self._record_variable_use(right_var)
+                # Only track usage if not a built-in
+                if right_var not in BUILTIN_VARIABLES:
+                    self._record_variable_use(right_var)
                 
                 op_map = {
                     ast.Lt: 'lt', ast.LtE: 'lte', ast.Gt: 'gt',
@@ -433,7 +553,9 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
     def visit_If(self, node):
         try:
             condition = self.visit(node.test)
-            self._record_variable_use(condition)
+            # Only track usage if not a built-in
+            if condition not in BUILTIN_VARIABLES:
+                self._record_variable_use(condition)
             
             if_step = {
                 'type': 'if',
@@ -522,11 +644,11 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                 elif isinstance(arg, ast.Name):
                     # Variable as loop bound - check if it's defined
                     var_name = arg.id
-                    if var_name not in self.var_map:
+                    if var_name not in self.var_map and var_name not in BUILTIN_VARIABLES:
                         raise self._create_error(
                             f"Variable '{var_name}' used as loop bound before definition", arg
                         )
-                    processed_args.append(self.var_map[var_name])
+                    processed_args.append(self.var_map.get(var_name, var_name))
                 elif isinstance(arg, ast.UnaryOp) and isinstance(arg.op, (ast.USub, ast.UAdd)):
                     # Handle negative constants
                     if isinstance(arg.operand, ast.Constant):
@@ -540,11 +662,11 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                         processed_args.append(str(value))
                     elif isinstance(arg.operand, ast.Name):
                         var_name = arg.operand.id
-                        if var_name not in self.var_map:
+                        if var_name not in self.var_map and var_name not in BUILTIN_VARIABLES:
                             raise self._create_error(
                                 f"Variable '{var_name}' used as loop bound before definition", arg
                             )
-                        var_ref = self.var_map[var_name]
+                        var_ref = self.var_map.get(var_name, var_name)
                         if isinstance(arg.op, ast.USub):
                             processed_args.append(f"-{var_ref}")
                         else:
@@ -613,6 +735,12 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             
             target = node.target.id
             
+            # Check if target is a built-in variable (read-only)
+            if target in BUILTIN_VARIABLES:
+                raise self._create_error(
+                    f"Cannot assign to built-in variable '{target}'", node.target
+                )
+            
             type_name = None
             array_dims = []
             
@@ -633,11 +761,11 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                             array_dims.append(str(dim.value))
                         elif isinstance(dim, ast.Name):
                             # Variable dimension
-                            if dim.id not in self.var_map:
+                            if dim.id not in self.var_map and dim.id not in BUILTIN_VARIABLES:
                                 raise self._create_error(
                                     f"Variable '{dim.id}' used as array dimension before definition", dim
                                 )
-                            array_dims.append(self.var_map[dim.id])
+                            array_dims.append(self.var_map.get(dim.id, dim.id))
                         else:
                             raise self._create_error(
                                 f"Invalid array dimension: {ast.dump(dim)}", dim
@@ -647,11 +775,11 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                     array_dims.append(str(slice_node.value))
                 elif isinstance(slice_node, ast.Name):
                     # Variable single dimension
-                    if slice_node.id not in self.var_map:
+                    if slice_node.id not in self.var_map and slice_node.id not in BUILTIN_VARIABLES:
                         raise self._create_error(
                             f"Variable '{slice_node.id}' used as array dimension before definition", slice_node
                         )
-                    array_dims.append(self.var_map[slice_node.id])
+                    array_dims.append(self.var_map.get(slice_node.id, slice_node.id))
                 else:
                     raise self._create_error(
                         f"Invalid array dimension specification", node.annotation
@@ -662,13 +790,8 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             elif isinstance(node.annotation, ast.Attribute):
                 type_name = node.annotation.attr
             
-            glsl_type_map = {
-                'int': 'int', 'uint': 'uint', 'float': 'float',
-                'double': 'double', 'bool': 'bool',
-                'vec2': 'vec2', 'vec3': 'vec3', 'vec4': 'vec4'
-            }
-            
-            glsl_type = glsl_type_map.get(type_name, 'float')
+            # Use GLSL_TYPE_MAP from gl_typing
+            glsl_type = GLSL_TYPE_MAP.get(type_name, 'float')
             
             if array_dims:
                 # Array declaration
@@ -677,6 +800,7 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                     full_type += f"[{dim}]"
                 
                 self.explicit_types[target] = full_type
+                self.var_types[target] = full_type  # ADD THIS LINE
                 
                 # Check if we have an initializer
                 if node.value:
@@ -692,8 +816,8 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                                 if isinstance(elem, ast.Constant):
                                     values.append(str(elem.value))
                                 elif isinstance(elem, ast.Name):
-                                    if elem.id in self.var_map:
-                                        values.append(self.var_map[elem.id])
+                                    if elem.id in self.var_map or elem.id in BUILTIN_VARIABLES:
+                                        values.append(self.var_map.get(elem.id, elem.id))
                                     else:
                                         raise self._create_error(
                                             f"Variable '{elem.id}' used in array initializer before definition", elem
@@ -719,6 +843,7 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             else:
                 # Regular type declaration
                 self.explicit_types[target] = glsl_type
+                self.var_types[target] = glsl_type  # ADD THIS LINE
                 
                 # Special handling for built-in variables like 'gid' and 'idx'
                 # These map to gl_GlobalInvocationID.x which is already defined
@@ -729,12 +854,17 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                         self.var_map[target] = 'gid'  # Always use 'gid' as it's already defined in shader
                         # Mark as int for Python semantics (GLSL will handle the uint conversion)
                         self.explicit_types[target] = 'int'
+                        self.var_types[target] = 'int'  # ADD THIS LINE
                         return 'gid'
                 
                 if node.value:
                     result_var = self.visit(node.value)
                     self.var_map[target] = target
-                    result_type = self._get_var_type(result_var)
+                    
+                    # Track the type of the result variable if it's a temporary
+                    if result_var.startswith('_t'):
+                        # We'll infer the type later in ShaderCompiler
+                        pass
                     
                     # Check if we can eliminate the temporary variable
                     if result_var.startswith('_t') and result_var in self.temp_var_usage_count:
@@ -742,19 +872,15 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                         if self.temp_var_usage_count.get(result_var, 0) <= 1:
                             # Replace the temp with target directly in future operations
                             self.var_map[result_var] = target
+                            # Store type mapping for the temporary
+                            self.var_types[result_var] = glsl_type
                             # We'll handle this during compilation, just store the mapping
                             self.graph.add_operation('direct_assign', [result_var, target, glsl_type], 
                                                     in_loop=bool(self.graph.current_scope))
                             return target
                     
-                    if glsl_type != result_type:
-                        cast_var = self.graph.add_operation('cast', [result_var, glsl_type], 
-                                                        in_loop=bool(self.graph.current_scope))
-                        self.graph.add_operation('assign', [target, cast_var], 
-                                                in_loop=bool(self.graph.current_scope))
-                    else:
-                        self.graph.add_operation('assign', [target, result_var], 
-                                                in_loop=bool(self.graph.current_scope))
+                    self.graph.add_operation('assign', [target, result_var], 
+                                            in_loop=bool(self.graph.current_scope))
                 else:
                     self.var_map[target] = target
             
@@ -763,11 +889,14 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
             raise
         except Exception as e:
             raise self._create_error(f"Error in annotated assignment: {e}", node)
-            
+
+
     def visit_While(self, node):
         try:
             test = self.visit(node.test)
-            self._record_variable_use(test)
+            # Only track usage if not a built-in
+            if test not in BUILTIN_VARIABLES:
+                self._record_variable_use(test)
             
             loop_info = {'type': 'while', 'test': test}
             
@@ -817,12 +946,26 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
     def visit_Return(self, node):
         try:
             if node.value is None:
-                self.graph.set_void_return()
+                # Void return - add operation if inside control flow
+                if self.graph.current_scope:
+                    self.graph.add_operation('return', [], output_var='_void_',
+                                            in_loop=bool(self.graph.current_scope))
+                else:
+                    self.graph.set_void_return()
                 return None
             
             result_var = self.visit(node.value)
-            self._record_variable_use(result_var)
-            self.graph.set_output(result_var)
+            # Only track usage if not a built-in
+            if result_var not in BUILTIN_VARIABLES:
+                self._record_variable_use(result_var)
+            
+            # If inside control flow, add return operation
+            if self.graph.current_scope:
+                self.graph.add_operation('return', [result_var], output_var='_void_',
+                                        in_loop=bool(self.graph.current_scope))
+            else:
+                self.graph.set_output(result_var)
+            
             return result_var
         except CompilationError:
             raise
@@ -943,7 +1086,12 @@ def _extract_hints(hints: Optional[Dict[str, tuple]]) -> Tuple[Dict[str, str], D
         if isinstance(value, tuple) and len(value) == 2:
             type_tuple, storage = value
             if isinstance(type_tuple, tuple) and len(type_tuple) == 2:
-                type_hints[key] = type_tuple[1]
+                # Check if it's an NP_GLTypes or Vec_GLTypes
+                # NP_GLTypes: (numpy_type, glsl_type)
+                # Vec_GLTypes: (panda3d_type, glsl_type)
+                # We only care about the GLSL type for code generation
+                glsl_type = type_tuple[1]
+                type_hints[key] = glsl_type
             else:
                 raise ValueError(f"Invalid type for '{key}': expected tuple like NP_GLTypes.float or Vec_GLTypes.vec3")
             storage_hints[key] = storage
@@ -983,6 +1131,7 @@ def _transpile_kernel(func):
         return  # Already transpiled
     
     hints = getattr(actual_func, '_gpu_kernel_hints', None)
+    layout = getattr(actual_func, '_gpu_kernel_layout', (64, 1, 1))
     
     # Get source file path
     try:
@@ -1039,7 +1188,7 @@ def _transpile_kernel(func):
     static_constants = getattr(actual_func, '_static_constants', None)
     
     transpiler = PythonToGLSLTranspiler(
-        arg_names, hints, source, actual_func.__name__, file_path, static_constants
+        arg_names, hints, source, actual_func.__name__, file_path, static_constants, layout
     )
     
     try:
@@ -1066,10 +1215,11 @@ def _transpile_kernel(func):
     actual_func._explicit_types = transpiler.explicit_types
     actual_func._needs_transpilation = False
 
-def gpu_kernel(hints: Optional[Dict[str, tuple]] = None):
+def gpu_kernel(hints: Optional[Dict[str, tuple]] = None, layout: Tuple[int, int, int] = (64, 1, 1)):
     def decorator(func):
         # Store hints for later transpilation
         func._gpu_kernel_hints = hints
+        func._gpu_kernel_layout = layout
         func._needs_transpilation = True
         return func
     

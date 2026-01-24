@@ -1,15 +1,24 @@
 import string
 
-STANDARD_HEADING = """
-#version 430
-layout (local_size_x = 64) in;
-uniform uint nItems;
-""".strip() + "\n"
+def get_standard_heading(layout=(64, 1, 1), include_n_items=True):
+    """Generate standard shader heading with custom layout"""
+    if isinstance(layout, (int, float)):
+        layout = (int(layout), 1, 1)
+    elif len(layout) == 2:
+        layout = (layout[0], layout[1], 1)
+    
+    heading = f"""#version 430
+layout (local_size_x = {layout[0]}, local_size_y = {layout[1]}, local_size_z = {layout[2]}) in;"""
+    
+    if include_n_items:
+        heading += "\nuniform uint nItems;"
+    
+    return heading.strip() + "\n"
 
 def _buff_line(idx: int, name: str, instance_name: str, buffer_type: str):
     return f"layout(std430, binding = {idx}) buffer {name} {{ {buffer_type} {instance_name}[]; }};"
 
-def create_shader(expr: str, arg_types: list[str], res_type: str) -> str:
+def create_shader(expr: str, arg_types: list[str], res_type: str, layout=(64, 1, 1)) -> str:
     buffers = []
     assignments = []
     uniforms = []
@@ -30,7 +39,7 @@ def create_shader(expr: str, arg_types: list[str], res_type: str) -> str:
         res_binding = buffer_count
         buffers.append(_buff_line(res_binding, "DR", "results", res_type))
     
-    shader_parts = [STANDARD_HEADING]
+    shader_parts = [get_standard_heading(layout)]
     
     if uniforms:
         shader_parts.extend(uniforms)
