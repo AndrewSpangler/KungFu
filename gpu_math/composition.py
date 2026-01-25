@@ -28,15 +28,18 @@ def create_shader(expr: str, arg_types: list[str], res_type: str, layout=(64, 1,
         var_name = string.ascii_lowercase[i]
         
         if storage == 'uniform':
+            uniforms.append(f"/* Input uniform*/")
             uniforms.append(f"uniform {t} {var_name};")
             assignments.append(f"{t} {var_name}_val = {var_name};")
         else:
+            uniforms.append(f"/* Input buffer/array*/")
             buffers.append(_buff_line(buffer_count, f"D{i}", f"data_{i}", t))
             assignments.append(f"{t} {var_name} = data_{i}[gid];")
             buffer_count += 1
     
     if res_type != 'void':
         res_binding = buffer_count
+        buffers.append("/* Results Buffer */")
         buffers.append(_buff_line(res_binding, "DR", "results", res_type))
     
     shader_parts = [get_standard_heading(layout)]

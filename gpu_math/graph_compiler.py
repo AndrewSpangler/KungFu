@@ -572,39 +572,38 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
                 'else_body': [] if node.orelse else None
             }
             
-            # Push the if step to graph's current_scope
-            self.graph.current_scope.append(if_step)
-            
-            # Visit then body
-            for stmt in node.body:
-                self.visit(stmt)
-            
-            # Pop the if step
-            self.graph.current_scope.pop()
-            
-            # If there's an else, do the same for else body
-            if node.orelse:
-                else_step = {
-                    'type': 'else',
-                    'body': []
-                }
-                self.graph.current_scope.append(else_step)
-                
-                for stmt in node.orelse:
-                    self.visit(stmt)
-                
-                self.graph.current_scope.pop()
-                if_step['else_body'] = else_step['body']
-            
             # Add the if step to the graph
             if self.graph.current_scope:
-                # We are inside another scope
                 current_scope = self.graph.current_scope[-1]
                 if 'body' not in current_scope:
                     current_scope['body'] = []
                 current_scope['body'].append(if_step)
             else:
                 self.graph.steps.append(if_step)
+            
+            # Process then body
+            saved_current_scope = self.graph.current_scope.copy()
+            self.graph.current_scope = [if_step]
+            
+            for stmt in node.body:
+                self.visit(stmt)
+            
+            self.graph.current_scope = saved_current_scope
+            
+            # Process else body if exists
+            if node.orelse:
+                else_step = {
+                    'type': 'else',
+                    'body': []
+                }
+                saved_current_scope = self.graph.current_scope.copy()
+                self.graph.current_scope = [else_step]
+                
+                for stmt in node.orelse:
+                    self.visit(stmt)
+                
+                self.graph.current_scope = saved_current_scope
+                if_step['else_body'] = else_step['body']
             
             return None
         except CompilationError:

@@ -158,6 +158,11 @@ class ShaderCompiler:
                 
                 elif step['type'] == 'loop' and 'body' in step:
                     collect_replacements(step['body'])
+                elif step['type'] == 'if':
+                    if 'then_body' in step:
+                        collect_replacements(step['then_body'])
+                    if 'else_body' in step and step['else_body']:
+                        collect_replacements(step['else_body'])
         
         collect_replacements(steps)
         
@@ -201,14 +206,164 @@ class ShaderCompiler:
                         new_step['loop_info'] = new_info
                         
                     new_steps.append(new_step)
+                
+                elif step['type'] == 'if':
+                    # Handle if statements
+                    new_step = step.copy()
+                    
+                    # Replace condition variable if needed
+                    if 'condition' in new_step:
+                        cond = new_step['condition']
+                        if isinstance(cond, str) and cond in var_replacements:
+                            new_step['condition'] = var_replacements[cond]
+                    
+                    # Recursively process then body
+                    if 'then_body' in new_step:
+                        new_step['then_body'] = filter_and_replace(new_step['then_body'])
+                    
+                    # Recursively process else body if it exists
+                    if 'else_body' in new_step and new_step['else_body']:
+                        new_step['else_body'] = filter_and_replace(new_step['else_body'])
+                    
+                    new_steps.append(new_step)
             
             return new_steps
             
         return filter_and_replace(steps)
+    
+    def _inline_single_use_conditions(self, steps):
+        """Inline condition variables that are only used in if/loop conditions"""
+        # Build a map of variable definitions (operation -> output_var)
+        var_definitions = {}  # var_name -> (step_index, operation_dict)
+        var_usage_count = {}  # var_name -> count
+        
+        # Count usages and find definitions
+        def count_usages(steps_list, parent_list=None, parent_idx=None):
+            for idx, step in enumerate(steps_list):
+                if step['type'] == 'operation':
+                    # This is a definition
+                    out_var = step['output_var']
+                    if out_var and out_var != '_void_':
+                        var_definitions[out_var] = (parent_list if parent_list is not None else steps_list, 
+                                                    parent_idx if parent_idx is not None else idx, 
+                                                    step)
+                        var_usage_count[out_var] = var_usage_count.get(out_var, 0)
+                    
+                    # Count usages in inputs
+                    for inp in step['inputs']:
+                        if isinstance(inp, str) and inp.startswith('_t'):
+                            var_usage_count[inp] = var_usage_count.get(inp, 0) + 1
+                
+                elif step['type'] == 'if':
+                    # Condition is a usage
+                    cond = step.get('condition', '')
+                    if isinstance(cond, str) and cond.startswith('_t'):
+                        var_usage_count[cond] = var_usage_count.get(cond, 0) + 1
+                    
+                    # Recurse into bodies
+                    if 'then_body' in step:
+                        count_usages(step['then_body'])
+                    if 'else_body' in step and step['else_body']:
+                        count_usages(step['else_body'])
+                
+                elif step['type'] == 'loop':
+                    # Loop conditions are usages
+                    if 'loop_info' in step:
+                        for key in ['start', 'end', 'step', 'condition', 'test']:
+                            val = step['loop_info'].get(key)
+                            if isinstance(val, str) and val.startswith('_t'):
+                                var_usage_count[val] = var_usage_count.get(val, 0) + 1
+                    
+                    # Recurse into body
+                    if 'body' in step:
+                        count_usages(step['body'])
+        
+        count_usages(steps)
+        
+        # Find variables that are used exactly once
+        single_use_vars = {var for var, count in var_usage_count.items() if count == 1}
+        
+        # Inline these variables directly into if conditions
+        def inline_conditions(steps_list):
+            new_steps = []
+            vars_to_remove = set()
+            
+            for idx, step in enumerate(steps_list):
+                if step['type'] == 'if':
+                    cond = step.get('condition', '')
+                    
+                    # If condition is a single-use temp variable, try to inline it
+                    if (isinstance(cond, str) and cond in single_use_vars and 
+                        cond in var_definitions):
+                        
+                        parent_list, def_idx, def_step = var_definitions[cond]
+                        
+                        # Only inline if the definition is immediately before this if statement
+                        # and in the same scope
+                        if (parent_list is steps_list and def_idx == len(new_steps) - 1 and 
+                            def_step['op_name'] in ['gt', 'lt', 'gte', 'lte', 'eq', 'neq']):
+                            
+                            # Build the inline expression
+                            inline_expr = self._build_inline_expression(def_step)
+                            
+                            if inline_expr:
+                                # Create new if step with inlined condition
+                                new_if_step = step.copy()
+                                new_if_step['condition'] = inline_expr
+                                
+                                # Process bodies recursively
+                                if 'then_body' in new_if_step:
+                                    new_if_step['then_body'] = inline_conditions(new_if_step['then_body'])
+                                if 'else_body' in new_if_step and new_if_step['else_body']:
+                                    new_if_step['else_body'] = inline_conditions(new_if_step['else_body'])
+                                
+                                # Remove the previous definition step
+                                new_steps.pop()
+                                vars_to_remove.add(cond)
+                                
+                                new_steps.append(new_if_step)
+                                continue
+                    
+                    # Standard processing
+                    new_step = step.copy()
+                    if 'then_body' in new_step:
+                        new_step['then_body'] = inline_conditions(new_step['then_body'])
+                    if 'else_body' in new_step and new_step['else_body']:
+                        new_step['else_body'] = inline_conditions(new_step['else_body'])
+                    new_steps.append(new_step)
+                
+                elif step['type'] == 'loop':
+                    new_step = step.copy()
+                    if 'body' in new_step:
+                        new_step['body'] = inline_conditions(new_step['body'])
+                    new_steps.append(new_step)
+                
+                else:
+                    # Regular operation
+                    if step['output_var'] not in vars_to_remove:
+                        new_steps.append(step)
+            
+            return new_steps
+        
+        return inline_conditions(steps)
+    
+    def _build_inline_expression(self, operation_step):
+        """Build an inline GLSL expression from an operation step"""
+        op_name = operation_step['op_name']
+        inputs = operation_step['inputs']
+        
+        # Use the OP_TO_GLSL mapping
+        if op_name in self.OP_TO_GLSL:
+            return self.OP_TO_GLSL[op_name](inputs)
+        
+        return None
 
     def compile(self):
         # First, optimize the graph to eliminate unnecessary temporaries
         self.graph.steps = self._optimize_direct_assignments(self.graph.steps)
+        
+        # Inline condition variables that are only used once
+        self.graph.steps = self._inline_single_use_conditions(self.graph.steps)
         
         # Generate static constant declarations
         static_constant_defs = []
@@ -403,7 +558,7 @@ void main() {{
             if isinstance(body_step, dict):
                 if body_step['type'] == 'operation':
                     op_name = body_step['op_name']
-                    inputs = body_step['inputs']
+                    inputs = body_step.get('inputs', [])
                     output_var = body_step.get('output_var')
                     
                     # Special handling for return statements
@@ -445,7 +600,7 @@ void main() {{
                 if isinstance(body_step, dict):
                     if body_step['type'] == 'operation':
                         op_name = body_step['op_name']
-                        inputs = body_step['inputs']
+                        inputs = body_step.get('inputs', [])
                         output_var = body_step.get('output_var')
                         
                         if op_name == 'return':
