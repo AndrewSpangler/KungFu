@@ -20,6 +20,70 @@ from gpu_math import (
     IOTypes
 )
 
+"""
+Generated GLSL code:
+#version 430
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+uniform int inverse;
+uniform uint nItems;
+uniform uint stage;
+layout(std430, binding = 0) buffer D0 { vec2 data_in[]; };
+layout(std430, binding = 1) buffer D1 { vec2 data_out[]; };
+
+void main() {
+
+        if((gl_GlobalInvocationID.x >= nItems)) {
+                return;
+        }
+        int gid_x_int = int(gl_GlobalInvocationID.x);
+        int _t3 = (int(stage) + 1);
+        int block_size = (1 << _t3);
+        int half_block = (1 << int(stage));
+        float block_idx = (gid_x_int / int(half_block));
+        int in_block_idx = (gid_x_int % int(half_block));
+        uint _t12 = (int(block_idx) * int(block_size));
+        uint idx1 = (int(_t12) + int(in_block_idx));
+        uint idx2 = (int(idx1) + int(half_block));
+        vec2 x1 = data_in[int(idx1)];
+        vec2 x2 = data_in[int(idx2)];
+        float PI = 3.141592653589793;
+        float _t22 = (-2.0);
+        float _t23 = (_t22 * PI);
+        float _t24 = float(in_block_idx);
+        float _t25 = (_t23 * _t24);
+        float _t26 = float(block_size);
+        float angle = (_t25 / _t26);
+        bool _t29 = (inverse == 1);
+        if(_t29) {
+                angle = (-angle);
+        }
+        float tw_real = cos(angle);
+        float tw_imag = sin(angle);
+        float _t36 = x2.x;
+        float _t37 = (_t36 * tw_real);
+        float _t38 = x2.y;
+        float _t39 = (_t38 * tw_imag);
+        float temp_real = (_t37 - _t39);
+        float _t42 = x2.x;
+        float _t43 = (_t42 * tw_imag);
+        float _t44 = x2.y;
+        float _t45 = (_t44 * tw_real);
+        float temp_imag = (_t43 + _t45);
+        float _t48 = x1.x;
+        float _t49 = (_t48 + temp_real);
+        float _t50 = x1.y;
+        float _t51 = (_t50 + temp_imag);
+        vec2 _t52 = vec2(_t49, _t51);
+        data_out[idx1] = _t52;
+        float _t53 = x1.x;
+        float _t54 = (_t53 - temp_real);
+        float _t55 = x1.y;
+        float _t56 = (_t55 - temp_imag);
+        vec2 _t57 = vec2(_t54, _t56);
+        data_out[idx2] = _t57;
+}
+"""
 @gpu_kernel({
     "data_in": (Vec_GLTypes.vec2, IOTypes.array),
     "data_out": (Vec_GLTypes.vec2, IOTypes.array),
@@ -78,6 +142,43 @@ def radix2_butterfly(
     data_out[idx2] = vec2(x1.x - temp_real, x1.y - temp_imag)
 
 
+
+"""
+Generated GLSL code:
+#version 430
+layout (local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+uniform uint log2n;
+uniform uint nItems;
+layout(std430, binding = 0) buffer D0 { vec2 data[]; };
+
+void main() {
+
+        if((gl_GlobalInvocationID.x >= nItems)) {
+                return;
+        }
+        int gid_x_int = int(gl_GlobalInvocationID.x);
+        uint rev_idx = uint(0);
+        uint temp_gid = uint(gid_x_int);
+        for(int i = 0; i < 16; i += 1) {
+                uint _t7 = uint(1);
+                uint bit = (int(temp_gid) & int(_t7));
+                uint _t10 = (int(rev_idx) << 1);
+                rev_idx = (int(_t10) | int(bit));
+                temp_gid = (int(temp_gid) >> 1);
+        }
+        int _t15 = (16 - int(log2n));
+        rev_idx = (int(rev_idx) >> _t15);
+        int _t18 = int(rev_idx);
+        bool _t19 = (gid_x_int < _t18);
+        if(_t19) {
+                vec2 temp_val = data[int(gid_x_int)];
+                vec2 _t22 = data[int(rev_idx)];
+                data[gid_x_int] = _t22;
+                data[rev_idx] = temp_val;
+        }
+}
+"""
 @gpu_kernel({
     "data": (Vec_GLTypes.vec2, IOTypes.array),
     "nItems": (NP_GLTypes.uint, IOTypes.uniform),
