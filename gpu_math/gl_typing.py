@@ -533,4 +533,6 @@ class NP_GLTypes:
     uint    = (np.uint32,   GLTypes.uint)
     bool    = (np.bool_,    GLTypes.bool)
     vec2    = (np.float32,  GLTypes.vec2)  # Actually needs 2 floats
+    vec3    = (np.float32,  GLTypes.vec3)  # Actually needs 2 floats
+    vec4    = (np.float32,  GLTypes.vec4)  # Actually needs 2 floats
     complex = (np.complex64, GLTypes.vec2)  # complex maps to vec2

@@ -274,8 +274,8 @@ class ShaderCompiler:
         buffers = []
         assignments = []
         
-        # Determine if this is a vectorized kernel
-        has_vectorized_buffers = False
+        # Get vectorization status from graph (set during transpilation)
+        has_vectorized_buffers = getattr(self.graph, 'is_vectorized', False)
         
         buffer_count = 0
         for var in sorted(self.graph.input_vars):
@@ -290,11 +290,14 @@ class ShaderCompiler:
                 self.declared_vars.add(var)  # Mark as declared (it's the buffer name itself)
                 buffer_count += 1
             else:
-                # Vectorized buffer - automatic [gid] access
-                has_vectorized_buffers = True
+                # Vectorized buffer - automatic [gid] access (only if kernel is vectorized)
                 buffer_inputs.append((buffer_count, var, var_type))
                 buffers.append(_buff_line(buffer_count, f"D{buffer_count}", f"data_{buffer_count}", var_type))
-                assignments.append(f"\n\t{var_type} {var} = data_{buffer_count}[gid];")
+                if has_vectorized_buffers:
+                    assignments.append(f"\n\t{var_type} {var} = data_{buffer_count}[gid];")
+                else:
+                    # For non-vectorized kernels with buffer storage, just declare the buffer
+                    self.declared_vars.add(f"data_{buffer_count}")
                 buffer_count += 1
         
         # Check if nItems is already in uniforms
@@ -325,7 +328,14 @@ class ShaderCompiler:
             result_type = self.var_types.get(self.graph.output_var, 'float')
             result_binding = len(buffer_inputs)
             buffers.append("\n" + _buff_line(result_binding, "DR", "results", result_type))
-            assignments.append(f"\n\tresults[gid] = {self.graph.output_var};")
+            
+            # Only use [gid] indexing for vectorized kernels
+            if has_vectorized_buffers:
+                assignments.append(f"\n\tresults[gid] = {self.graph.output_var};")
+            else:
+                # For array-style kernels, the result buffer is accessed directly by name
+                # The user's code should handle indexing explicitly
+                assignments.append(f"\n\tresults[0] = {self.graph.output_var};")
         
         functions_section = '\n'.join(glsl_function_defs) if glsl_function_defs else ''
         
@@ -352,10 +362,18 @@ class ShaderCompiler:
         if functions_section:
             code_parts.append(functions_section)
         
-        code_parts.append(f"""
+        # Only add vectorization code (gid and bounds check) for vectorized kernels
+        if has_vectorized_buffers:
+            code_parts.append(f"""
 void main() {{
 \tint gid = int(gl_GlobalInvocationID.x);
 \tif(gid >= nItems) return;
+\t{''.join(assignments)}
+}}""")
+        else:
+            # Array-style kernel - no automatic gid or bounds check
+            code_parts.append(f"""
+void main() {{
 \t{''.join(assignments)}
 }}""")
         

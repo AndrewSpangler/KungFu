@@ -35,9 +35,6 @@ layout(std430, binding = 0) buffer D0 { vec2 data_in[]; };
 layout(std430, binding = 1) buffer D1 { vec2 data_out[]; };
 
 void main() {
-    int gid = int(gl_GlobalInvocationID.x);
-    if(gid >= nItems) return;
-
     uint gidx = uint(gl_GlobalInvocationID.x);
     uint groups = (int(nItems) >> 4);
     bool _t3 = (gidx >= groups);
@@ -307,7 +304,7 @@ def benchmark_gpu_avg(count = 20):
     print("="*60)
     
     for i in range(count + 1):
-        t_gpu, t_cpu = app.run_test(N=16**5, output=False, test_inverse=False)
+        t_gpu, t_cpu = app.run_test(N=16**5, output=True, test_inverse=False)
         gpu_times.append(t_gpu)
         cpu_times.append(t_cpu)
         print(f"Run {i+1}: GPU={t_gpu:.5f}s, CPU={t_cpu:.5f}s, Speedup={t_cpu/t_gpu:.2f}x")

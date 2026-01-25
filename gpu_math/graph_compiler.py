@@ -7,7 +7,8 @@ from .composition import get_standard_heading, _buff_line
 from .cast_buffer import CastBuffer
 from .gl_typing import (
     GLTypes, NP_GLTypes, Vec_GLTypes, VEC_TO_GLSL,
-    BUILTIN_VARIABLES, GLSL_TYPE_MAP, is_kungfu_builtin
+    BUILTIN_VARIABLES, GLSL_TYPE_MAP, is_kungfu_builtin,
+    get_kungfu_builtin_glsl
 )
 from .compute_graph import ComputeGraph
 from .error_handler import (
@@ -19,7 +20,7 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
     def __init__(self, arg_names: List[str], hints: Dict[str, tuple] = None,
                  source_code: str = "", function_name: str = "", file_path: str = "",
                  static_constants: List[Tuple[str, str, int, list]] = None,
-                 layout: Tuple[int, int, int] = (64, 1, 1)):
+                 layout: Tuple[int, int, int] = (64, 1, 1), vectorized: Optional[bool] = None):
         self.graph = ComputeGraph()
         self.arg_names = arg_names
         self.var_map = {}
@@ -40,14 +41,21 @@ class PythonToGLSLTranspiler(ast.NodeVisitor):
         self.has_vectorized_inputs = False
         self.has_array_inputs = False
         
-        # Check inputs to determine kernel type
-        for arg in arg_names:
-            hint = self.hints.get(arg, (NP_GLTypes.float, "buffer"))
-            storage = hint[1] if len(hint) > 1 else "buffer"
-            if storage == "buffer":
-                self.has_vectorized_inputs = True
-            elif storage == "array":
-                self.has_array_inputs = True
+        # Check inputs to determine kernel type (only if not explicitly set)
+        if vectorized is None:
+            for arg in arg_names:
+                hint = self.hints.get(arg, (NP_GLTypes.float, "buffer"))
+                storage = hint[1] if len(hint) > 1 else "buffer"
+                if storage == "buffer":
+                    self.has_vectorized_inputs = True
+                elif storage == "array":
+                    self.has_array_inputs = True
+        else:
+            # Explicitly set by decorator
+            self.has_vectorized_inputs = vectorized
+        
+        # Store in graph for later use
+        self.graph.is_vectorized = self.has_vectorized_inputs
         
         # Add built-in variables to explicit types
         for builtin_name, builtin_type in BUILTIN_VARIABLES.items():
@@ -1186,9 +1194,10 @@ def _transpile_kernel(func):
     
     # Extract static constants from function decorators (NOW they're applied!)
     static_constants = getattr(actual_func, '_static_constants', None)
+    vectorized = getattr(actual_func, '_gpu_kernel_vectorized', None)
     
     transpiler = PythonToGLSLTranspiler(
-        arg_names, hints, source, actual_func.__name__, file_path, static_constants, layout
+        arg_names, hints, source, actual_func.__name__, file_path, static_constants, layout, vectorized
     )
     
     try:
@@ -1215,11 +1224,12 @@ def _transpile_kernel(func):
     actual_func._explicit_types = transpiler.explicit_types
     actual_func._needs_transpilation = False
 
-def gpu_kernel(hints: Optional[Dict[str, tuple]] = None, layout: Tuple[int, int, int] = (64, 1, 1)):
+def gpu_kernel(hints: Optional[Dict[str, tuple]] = None, layout: Tuple[int, int, int] = (64, 1, 1), vectorized: Optional[bool] = None):
     def decorator(func):
         # Store hints for later transpilation
         func._gpu_kernel_hints = hints
         func._gpu_kernel_layout = layout
+        func._gpu_kernel_vectorized = vectorized  # None means auto-detect based on IOTypes
         func._needs_transpilation = True
         return func
     
