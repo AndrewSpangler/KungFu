@@ -1,8 +1,3 @@
-# [file name]: base_transpiler.py
-"""
-Base transpiler class with common functionality for all shader types.
-"""
-
 import ast
 from .ast_utils import ASTVisitorBase
 from .gl_typing import (
@@ -10,7 +5,7 @@ from .gl_typing import (
     GLSL_MATH_FUNCTIONS, GLSL_TYPE_CONSTRUCTORS,
     ALL_GLSL_FUNCTIONS, ShaderType, AST_BIN_SYMBOL_MAP,
     AST_UNARY_SYMBOL_MAP, AST_COMPARISON_SYMBOL_MAP,
-    AST_BOOL_SYMBOL_MAP
+    AST_BOOL_SYMBOL_MAP, SWIZZLES
 )
 from .helpers import CompilationError, get_builtin_variables
 

@@ -30,8 +30,6 @@ class ShaderFunction:
         )
 class ShaderFunctionTranspiler:
     """Transpiler for shader functions"""
-    
-    # Use centralized OP_TO_GLSL
     OP_TO_GLSL = OP_TO_GLSL
     
     @classmethod

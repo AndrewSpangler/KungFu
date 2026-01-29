@@ -1,5 +1,4 @@
 from .gpu_math import GPUMath
-from .engine import GPUEngine, get_engine
 
 from .cast_buffer import CastBuffer
 from .graph_compiler import (
@@ -8,7 +7,6 @@ from .graph_compiler import (
 )
 from .ast_utils import ASTVisitorBase
 from .shader_compiler import ShaderCompiler
-
 from .base_transpiler import BaseTranspiler
 from .shader_inputs import ShaderInputManager
 from .function_registry import FunctionRegistry
@@ -31,25 +29,6 @@ from .helpers import (
     get_shader_version,
     get_builtin_variables
 )
-
-# Export all GLSL operations
-for op_name in [
-    'add', 'sub', 'mul', 'div', 'mod', 'pow',
-    'sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2',
-    'sinh', 'cosh', 'tanh',
-    'exp', 'log', 'exp2', 'log2', 'sqrt', 'inversesqrt',
-    'abs', 'sign', 'floor', 'ceil', 'fract',
-    'min', 'max', 'clamp', 'mix', 'step', 'smoothstep',
-    'length', 'distance', 'dot', 'cross', 'normalize',
-    'reflect', 'refract',
-    'transpose', 'determinant', 'inverse',
-    'vec2', 'vec3', 'vec4',
-    'ivec2', 'ivec3', 'ivec4',
-    'uvec2', 'uvec3', 'uvec4',
-    'int', 'uint', 'float'
-]:
-    globals()[op_name] = getattr(GPUEngine, op_name) if hasattr(GPUEngine, op_name) else None
-
 from .algorithms import Radix16FFT, Radix2FFT
 
 class ADDONS:
