@@ -43,6 +43,7 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
         
         self._initialize_builtins()
         self._initialize_from_hints()
+        self._initialize_custom_uniforms()
 
     def _initialize_builtins(self):
         """Initialize built-in variables for shader type"""
@@ -77,6 +78,36 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
             if not hasattr(self, 'input_storage'):
                 self.input_storage = {}
             self.input_storage[arg] = storage
+
+    def _initialize_custom_uniforms(self):
+        """Initialize custom uniforms and textures from decorator"""
+        # Add custom uniforms to the graph inputs
+        for name, info in self.custom_uniforms.items():
+            if isinstance(info, tuple):
+                glsl_type = info[0]
+            else:
+                glsl_type = info
+            
+            # Add as uniform input
+            self.graph.add_input(name, IOTypes.uniform)
+            self.var_map[name] = name
+            self.explicit_types[name] = glsl_type
+            # Also add to storage hints
+            self.graph.storage_hints[name] = IOTypes.uniform
+        
+        # Add custom textures
+        for name, info in self.custom_textures.items():
+            if isinstance(info, tuple):
+                glsl_type = info[0]
+            else:
+                glsl_type = info
+            
+            # Add as uniform input (textures are uniforms in GLSL)
+            self.graph.add_input(name, IOTypes.uniform)
+            self.var_map[name] = name
+            self.explicit_types[name] = glsl_type
+            # Also add to storage hints
+            self.graph.storage_hints[name] = IOTypes.uniform
 
     def _handle_builtin_variable(self, var_name: str) -> Optional[str]:
         """Handle built-in variables"""
@@ -316,6 +347,49 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
                                         in_loop=bool(self.graph.current_scope))
                 return
             
+            # Handle attribute assignments (e.g., hsv.y = 0.8)
+            if isinstance(target, ast.Attribute):
+                # Get the base object (e.g., hsv)
+                base_var = self.visit(target.value)
+                attr_name = target.attr
+                value_var = self.visit(node.value)
+                
+                # Get the base variable name from var_map
+                base_var_name = base_var
+                if base_var in self.var_map and self.var_map[base_var] != base_var:
+                    base_var_name = self.var_map[base_var]
+                
+                # Create a swizzle operation to rebuild the vector with the new component
+                result_var = f"_t{self.graph.var_counter}"
+                self.graph.var_counter += 1
+                
+                # Determine which component is being modified
+                component_index = {'x': 0, 'y': 1, 'z': 2, 'w': 3, 
+                                'r': 0, 'g': 1, 'b': 2, 'a': 3}.get(attr_name, 0)
+                
+                # Get the vector type
+                vector_type = self._get_var_type(base_var)
+                
+                # Create a new vector with the modified component
+                # This is handled in the compiler by creating a vec constructor
+                self.graph.add_operation('set_vector_component', 
+                                    [base_var_name, str(component_index), value_var],
+                                    output_var=result_var,
+                                    in_loop=bool(self.graph.current_scope))
+                
+                # Update the variable mapping
+                # Find which variable name maps to this base_var
+                for var_name, mapped_var in self.var_map.items():
+                    if mapped_var == base_var_name:
+                        self.var_map[var_name] = result_var
+                        # Copy type information
+                        if base_var_name in self.var_types:
+                            self.var_types[result_var] = self.var_types[base_var_name]
+                            self.graph.var_types[result_var] = self.var_types[base_var_name]
+                        break
+                
+                return
+            
             if not isinstance(target, ast.Name):
                 raise self._create_error(
                     f"Unsupported assignment target: {type(target).__name__}", target
@@ -336,7 +410,6 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
                     self.graph.var_types[var_name] = self.explicit_types[var_name]
                 return
             
-            # CRITICAL FIX: Check if this variable already exists in the current scope
             if var_name in self.var_map:
                 # This is a reassignment - update the existing variable
                 existing_var = self.var_map[var_name]
@@ -429,8 +502,21 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
                         self.var_types[var_name] = self.explicit_types[var_name]
                         self.graph.var_types[var_name] = self.explicit_types[var_name]
                 else:
+                    # Check if variable was pre-declared (e.g., from if-statement pre-scanning)
+                    if var_name in self.var_map:
+                        # Variable already exists, just assign to it
+                        existing_var = self.var_map[var_name]
+                        self.graph.add_operation('assign', [value_var, existing_var], 
+                                                output_var=existing_var,
+                                                in_loop=bool(self.graph.current_scope))
+                        
+                        # Update type information
+                        if var_name in self.explicit_types:
+                            value_type = self.explicit_types[var_name]
+                            self.var_types[existing_var] = value_type
+                            self.graph.var_types[existing_var] = value_type
                     # For regular variables, check if value is already a temp variable
-                    if value_var.startswith('_t') and value_var in self.var_types:
+                    elif value_var.startswith('_t') and value_var in self.var_types:
                         # Value is already a temporary, just map directly to it
                         self.var_map[var_name] = value_var
                         
@@ -507,6 +593,48 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
 
     def visit_If(self, node):
         try:
+            # Pre-scan to find variables assigned in any branch
+            assigned_vars = set()
+            var_annotations = {}
+            
+            def find_assignments(stmts):
+                for stmt in stmts:
+                    if isinstance(stmt, (ast.Assign, ast.AnnAssign)):
+                        if isinstance(stmt, ast.Assign):
+                            target = stmt.targets[0]
+                        else:
+                            target = stmt.target
+                            # Extract type annotation
+                            if isinstance(stmt.annotation, ast.Name):
+                                type_name = stmt.annotation.id
+                                if type_name in GLSL_TYPE_MAP:
+                                    var_annotations[target.id] = GLSL_TYPE_MAP[type_name]
+                        if isinstance(target, ast.Name):
+                            assigned_vars.add(target.id)
+                    elif isinstance(stmt, ast.If):
+                        find_assignments(stmt.body)
+                        find_assignments(stmt.orelse)
+            
+            find_assignments(node.body)
+            find_assignments(node.orelse)
+            
+            # Pre-declare variables that will be assigned in branches
+            for var_name in assigned_vars:
+                if var_name not in self.var_map:
+                    temp_var = f"_t{self.graph.var_counter}"
+                    self.graph.var_counter += 1
+                    self.var_map[var_name] = temp_var
+                    # Store type from annotation if available
+                    if var_name in var_annotations:
+                        var_type = var_annotations[var_name]
+                        self.explicit_types[var_name] = var_type
+                        self.var_types[temp_var] = var_type
+                        self.graph.var_types[temp_var] = var_type
+                    else:
+                        # Store a placeholder type (will be updated on actual assignment)
+                        self.var_types[temp_var] = 'float'
+                        self.graph.var_types[temp_var] = 'float'
+            
             test_var = self.visit(node.test)
             
             if_step = {

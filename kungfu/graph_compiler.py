@@ -241,7 +241,11 @@ def _transpile_shader(func):
     shader_code = compiler.compile()
     
     actual_func._shader_code = shader_code
-    actual_func._shader_info = {'code': shader_code, 'type': shader_type}
+    actual_func._shader_info = {
+        'code': shader_code, 
+        'type': shader_type,
+        'functions': list(transpiler.called_functions)  # Store called functions
+    }
     actual_func._needs_shader_transpilation = False
     
     return shader_code

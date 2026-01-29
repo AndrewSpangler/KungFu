@@ -10,7 +10,7 @@ from .shader_compiler import ShaderCompiler
 from .base_transpiler import BaseTranspiler
 from .shader_inputs import ShaderInputManager
 from .function_registry import FunctionRegistry
-from .shader_functions import ShaderFunction, ShaderFunctionTranspiler
+from .shader_functions import ShaderFunctionTranspiler
 from .graph_compiler import function
 
 from .gl_typing import (

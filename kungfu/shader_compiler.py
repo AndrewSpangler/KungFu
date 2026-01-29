@@ -7,10 +7,10 @@ class ShaderCompiler:
     """Wrapper for UnifiedCompiler for backward compatibility"""
     
     def __init__(self, graph: ComputeGraph, input_types: Dict[str, str], 
-                 explicit_types: Dict[str, str] = None, local_functions: Dict = None):
+                 explicit_types: Dict[str, str] = None, local_functions: Dict = None, uniforms: Dict = None):
         self.compiler = UnifiedCompiler(
             graph, ShaderType.COMPUTE, input_types, explicit_types,
-            used_builtins=None, custom_uniforms=None, custom_textures=None,
+            used_builtins=None, custom_uniforms=uniforms, custom_textures=None,
             local_functions=local_functions
         )
         self.graph = graph

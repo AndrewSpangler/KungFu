@@ -23,6 +23,7 @@ from .gl_typing import (
     NP_TO_GLSL, VEC_TO_GLSL, ShaderType, IOTypes
 )
 from .shader_functions import ShaderFunctionTranspiler
+from .module_loader import ModuleLoader, import_file
 
 class GPUMath:
     def __init__(self, base, headless=False):
@@ -30,10 +31,8 @@ class GPUMath:
         self.op_registry = {}
         self.fused_cache = {}
         self.code_cache = {}
-        
-        # Initialize function registry
         self.function_registry = FunctionRegistry()
-        
+                
         for name, arity_map in CONFIG.items():
             self.op_registry[name] = {}
             for arity, (expr, overloads) in arity_map.items():
@@ -46,8 +45,23 @@ class GPUMath:
             
             setattr(self, name, lambda *args, n=name: self._dispatch(n, *args))
         
+        try:
+            import kungfu as kungfu_module
+        except ImportError:
+            raise RuntimeError("Can't import kungfu")
+        self.module_loader = ModuleLoader(self, kungfu_module)
+
         if headless:
             self._setup_headless()
+
+    def import_file(self, filepath: str, **kwargs) -> 'ModuleType':
+        return self.module_loader.import_file(filepath, extra_modules=kwargs)
+
+    def reload_file(self, filepath: str) -> 'ModuleType':
+        return self.module_loader.reload(filepath)
+
+    def get_imported_module(self, filepath: str) -> 'Optional[ModuleType]':
+        return self.module_loader.get_module(filepath)
 
     def _compile(self, code, res_type):
         shader = Shader.make_compute(Shader.SL_GLSL, code)
@@ -394,8 +408,8 @@ class GPUMath:
             pipe, "math_headless", 0, fb_prop, win_prop, GraphicsPipe.BF_refuse_window
         )
     
-    def shader(self, shader_type: str):
-        return shader_decorator(shader_type)
+    def shader(self, shader_type: str, uniforms : Dict = None):
+        return shader_decorator(shader_type, uniforms = uniforms)
     
     def compile_shader(self, func, debug: bool = False):
         is_method = inspect.ismethod(func)

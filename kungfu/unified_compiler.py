@@ -16,7 +16,8 @@ class UnifiedCompiler:
     def __init__(self, graph: ComputeGraph, shader_type: ShaderType, 
                 input_types: Dict[str, str], explicit_types: Dict[str, str] = None,
                 used_builtins: set = None, custom_uniforms: Dict = None,
-                custom_textures: Dict = None, local_functions: Dict = None):
+                custom_textures: Dict = None, local_functions: Dict = None,
+                is_function: bool = False):
         self.graph = graph
         self.shader_type = shader_type
         self.input_types = input_types
@@ -29,30 +30,37 @@ class UnifiedCompiler:
         self.local_functions = local_functions or {}
         self.temporary_types = {}
         self.declared_vars = set()
+        self.is_function = is_function  # Flag to indicate function compilation
         
-        self.declared_vars.update(graph.input_vars)
-        self.declared_vars.update(graph.uniform_vars)
-        
-        # Add compute shader builtins
-        for builtin_name in BUILTIN_VARIABLES:
-            self.declared_vars.add(builtin_name)
-            self.var_types[builtin_name] = BUILTIN_VARIABLES[builtin_name]
-        
-        # Add shader-specific builtins (Panda3D and GLSL)
-        from .gl_typing import PANDA3D_BUILTINS, GLSL_BUILTINS
-        for builtin_name, builtin_type in PANDA3D_BUILTINS.items():
-            self.var_types[builtin_name] = builtin_type
-        
-        shader_builtins = {}
-        if shader_type == ShaderType.VERTEX:
-            shader_builtins = GLSL_BUILTINS.get('vertex', {})
-        elif shader_type == ShaderType.FRAGMENT:
-            shader_builtins = GLSL_BUILTINS.get('fragment', {})
-        elif shader_type == ShaderType.GEOMETRY:
-            shader_builtins = GLSL_BUILTINS.get('geometry', {})
-        
-        for builtin_name, builtin_type in shader_builtins.items():
-            self.var_types[builtin_name] = builtin_type
+        if not self.is_function:
+            # Only add these for regular shaders, not functions
+            self.declared_vars.update(graph.input_vars)
+            self.declared_vars.update(graph.uniform_vars)
+            
+            # Add compute shader builtins
+            for builtin_name in BUILTIN_VARIABLES:
+                self.declared_vars.add(builtin_name)
+                self.var_types[builtin_name] = BUILTIN_VARIABLES[builtin_name]
+            
+            # Add shader-specific builtins (Panda3D and GLSL)
+            from .gl_typing import PANDA3D_BUILTINS, GLSL_BUILTINS
+            for builtin_name, builtin_type in PANDA3D_BUILTINS.items():
+                self.var_types[builtin_name] = builtin_type
+            
+            shader_builtins = {}
+            if shader_type == ShaderType.VERTEX:
+                shader_builtins = GLSL_BUILTINS.get('vertex', {})
+            elif shader_type == ShaderType.FRAGMENT:
+                shader_builtins = GLSL_BUILTINS.get('fragment', {})
+            elif shader_type == ShaderType.GEOMETRY:
+                shader_builtins = GLSL_BUILTINS.get('geometry', {})
+            
+            for builtin_name, builtin_type in shader_builtins.items():
+                self.var_types[builtin_name] = builtin_type
+        else:
+            # For functions, parameters are already declared
+            for param in input_types:
+                self.declared_vars.add(param)
         
         self.function_dependencies = set()
         self.temp_to_final_map = {}
@@ -67,7 +75,10 @@ class UnifiedCompiler:
         self.var_usage_scope = {}
         self.current_scope_depth = 0
         self.vars_to_hoist = set()
-
+        
+        if not self.is_function:
+            self._collect_function_dependencies(self.graph.steps)
+    
     def _collect_function_dependencies(self, steps):
         """Collect all function dependencies from the compute graph"""
         def collect_from_steps(steps_list):
@@ -86,7 +97,7 @@ class UnifiedCompiler:
                         collect_from_steps(step['else_body'])
         
         collect_from_steps(steps)
-
+    
     def _analyze_variable_scopes(self, steps, depth=0):
         """Analyze which variables are declared and used at which scope levels"""
         for step in steps:
@@ -209,36 +220,81 @@ class UnifiedCompiler:
         return f"{return_type} {func_name}({param_str}) {{\n{body}\n}}"
 
     def _get_function_declarations(self) -> List[str]:
-        """Get GLSL declarations for all required functions"""
+        """Get GLSL declarations for all required functions in dependency order"""
         declarations = []
         
         if not self.function_dependencies:
             return declarations
         
-        # Handle local inline functions first (they may be dependencies)
-        for func_name in list(self.function_dependencies):
-            if func_name in self.local_functions:
-                local_func = self.local_functions[func_name]
-                func_decl = self._transpile_local_function(local_func)
-                if func_decl:
-                    declarations.append(func_decl)
-        
-        # Handle registered shader functions
+        # Collect all dependencies (both local and registered)
         all_deps = set()
         for func_name in self.function_dependencies:
             if func_name not in self.local_functions:
                 all_deps.update(ShaderFunctionTranspiler.get_all_dependencies(func_name))
         all_deps.update(self.function_dependencies)
         
+        # Build dependency graph
+        dep_graph = {}
         for func_name in all_deps:
             if func_name in self.local_functions:
-                continue
-            func_metadata = FunctionRegistry.get(func_name)
-            if func_metadata:
-                glsl_code = ShaderFunctionTranspiler.transpile_function(
-                    func_metadata, self.shader_type
-                )
-                declarations.append(glsl_code)
+                # Local functions - find calls in AST
+                local_func = self.local_functions[func_name]
+                calls = ShaderFunctionTranspiler._find_function_calls(local_func['ast_node'])
+                dep_graph[func_name] = [c for c in calls if c in all_deps or c in self.local_functions]
+            else:
+                # Registered functions
+                func_metadata = FunctionRegistry.get(func_name)
+                if func_metadata and 'ast_node' in func_metadata:
+                    calls = ShaderFunctionTranspiler._find_function_calls(func_metadata['ast_node'])
+                    dep_graph[func_name] = [c for c in calls if c in all_deps or c in self.local_functions]
+                else:
+                    dep_graph[func_name] = []
+        
+        # Also check local functions that are direct dependencies
+        for func_name in list(self.function_dependencies):
+            if func_name in self.local_functions and func_name not in dep_graph:
+                local_func = self.local_functions[func_name]
+                calls = ShaderFunctionTranspiler._find_function_calls(local_func['ast_node'])
+                dep_graph[func_name] = [c for c in calls if c in all_deps or c in self.local_functions]
+        
+        # Topological sort
+        ordered = []
+        visited = set()
+        temp_mark = set()
+        
+        def visit(node):
+            if node in temp_mark:
+                # Circular dependency - skip for now
+                return
+            if node in visited:
+                return
+            
+            temp_mark.add(node)
+            for dep in dep_graph.get(node, []):
+                visit(dep)
+            temp_mark.remove(node)
+            visited.add(node)
+            ordered.append(node)
+        
+        # Visit all nodes
+        for func_name in dep_graph:
+            if func_name not in visited:
+                visit(func_name)
+        
+        # Generate declarations in dependency order
+        for func_name in ordered:
+            if func_name in self.local_functions:
+                local_func = self.local_functions[func_name]
+                func_decl = self._transpile_local_function(local_func)
+                if func_decl:
+                    declarations.append(func_decl)
+            else:
+                func_metadata = FunctionRegistry.get(func_name)
+                if func_metadata:
+                    glsl_code = ShaderFunctionTranspiler.transpile_function(
+                        func_metadata, self.shader_type
+                    )
+                    declarations.append(glsl_code)
         
         return declarations
 
@@ -314,10 +370,66 @@ class UnifiedCompiler:
 
     def compile(self) -> str:
         """Compile the compute graph to shader code"""
-        if self.shader_type == ShaderType.COMPUTE:
+        if self.is_function:
+            return self.compile_function_body()
+        elif self.shader_type == ShaderType.COMPUTE:
             return self._compile_compute()
         else:
             return self._compile_graphics()
+
+    def compile_function_body(self) -> str:
+        """Compile just the function body (for function declarations)"""
+        self._analyze_variable_scopes(self.graph.steps, 0)
+        self._compute_hoist_requirements()
+        
+        # Track all variables declared in function scope
+        function_scope_vars = set()
+        
+        # For functions, declare all parameters as already declared
+        for param in self.input_types:
+            function_scope_vars.add(param)
+            self.declared_vars.add(param)
+        
+        # Declare hoisted variables at function scope
+        for var_name in sorted(self.vars_to_hoist):
+            var_type = self._get_var_type(var_name)
+            default_init = {
+                'int': '0',
+                'uint': '0u',
+                'float': '0.0',
+                'bool': 'false',
+                'vec2': 'vec2(0.0)',
+                'vec3': 'vec3(0.0)',
+                'vec4': 'vec4(0.0)',
+                'ivec2': 'ivec2(0)',
+                'ivec3': 'ivec3(0)',
+                'ivec4': 'ivec4(0)',
+                'uvec2': 'uvec2(0u)',
+                'uvec3': 'uvec3(0u)',
+                'uvec4': 'uvec4(0u)',
+            }
+            init_value = default_init.get(var_type, '0.0')
+            
+            # Add declaration
+            function_scope_vars.add(var_name)
+            self.declared_vars.add(var_name)
+        
+        # Now process the graph steps to generate code
+        assignments = []
+        for step in self.graph.steps:
+            if step['type'] == 'operation':
+                self._process_operation(step['op_name'], step['inputs'], 
+                                    step.get('output_var'), assignments, 1, function_scope_vars)
+            elif step['type'] == 'loop':
+                self._process_loop_step(step, assignments, 1, function_scope_vars)
+            elif step['type'] == 'if':
+                self._process_loop_step(step, assignments, 1, function_scope_vars)
+        
+        # For functions, add a return statement if we have an output
+        if self.graph.output_var and not self.graph.has_void_return:
+            assignments.append(f"\treturn {self.graph.output_var};")
+        
+        return '\n'.join(assignments) if assignments else "\t// Empty function body"
 
     def _compile_compute(self) -> str:
         """Compile compute shader"""
@@ -503,10 +615,13 @@ class UnifiedCompiler:
         
         return "\n".join(shader_parts)
 
-
     def _compile_graphics(self) -> str:
         """Compile fragment, vertex, or geometry shader"""
         version = get_shader_version(self.shader_type)
+        
+        # Analyze variable scopes and compute hoisting requirements
+        self._analyze_variable_scopes(self.graph.steps, 0)
+        self._compute_hoist_requirements()
         
         self._collect_function_dependencies(self.graph.steps)
         function_declarations = self._get_function_declarations()
@@ -523,6 +638,31 @@ class UnifiedCompiler:
             outputs_code = ShaderInputManager.get_default_outputs(self.shader_type)
         
         shader_body = []
+        
+        # Declare hoisted variables at shader scope
+        for var_name in sorted(self.vars_to_hoist):
+            var_type = self._get_var_type(var_name)
+            default_init = {
+                'int': '0',
+                'uint': '0u',
+                'float': '0.0',
+                'bool': 'false',
+                'vec2': 'vec2(0.0)',
+                'vec3': 'vec3(0.0)',
+                'vec4': 'vec4(0.0)',
+                'ivec2': 'ivec2(0)',
+                'ivec3': 'ivec3(0)',
+                'ivec4': 'ivec4(0)',
+                'uvec2': 'uvec2(0u)',
+                'uvec3': 'uvec3(0u)',
+                'uvec4': 'uvec4(0u)',
+            }
+            init_value = default_init.get(var_type, '0.0')
+            
+            shader_body.append(f"\t{var_type} {var_name} = {init_value};")
+            self.var_types[var_name] = var_type
+            self.declared_vars.add(var_name)
+        
         for step in self.graph.steps:
             assignments = []
             if step['type'] == 'operation':

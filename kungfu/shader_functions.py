@@ -1,45 +1,25 @@
 import ast
+import inspect
 from typing import Dict, List, Tuple, Optional, Set, Any
 from .function_registry import FunctionRegistry
-from .gl_typing import OP_TO_GLSL, ShaderType
-from .helpers import get_op_glsl
+from .gl_typing import ShaderType
+from .helpers import CompilationError, create_error_context
 
-class ShaderFunction:
-    """Represents a transpiled shader function"""
-    
-    def __init__(self, name: str, source_code: str = "", ast_node: ast.FunctionDef = None,
-                 param_names: List[str] = None, param_types: Dict[str, str] = None,
-                 return_type: str = "float"):
-        self.name = name
-        self.source_code = source_code
-        self.ast_node = ast_node
-        self.param_names = param_names or []
-        self.param_types = param_types or {}
-        self.return_type = return_type
-    
-    @classmethod
-    def from_metadata(cls, func_metadata: Dict) -> 'ShaderFunction':
-        """Create a ShaderFunction from function registry metadata"""
-        return cls(
-            name=func_metadata['name'],
-            source_code=func_metadata.get('source_code', ''),
-            ast_node=func_metadata.get('ast_node'),
-            param_names=func_metadata.get('param_names', []),
-            param_types=func_metadata.get('param_types', {}),
-            return_type=func_metadata.get('return_type', 'float')
-        )
 class ShaderFunctionTranspiler:
-    """Transpiler for shader functions"""
-    OP_TO_GLSL = OP_TO_GLSL
+    """Transpiler for shader functions that reuses the main transpiler infrastructure"""
     
-    @classmethod
-    def transpile_function(cls, func_metadata: Dict, shader_type: ShaderType) -> str:
-        """Transpile a function to GLSL"""
+    @staticmethod
+    def transpile_function(func_metadata: Dict, shader_type: ShaderType) -> str:
+        """Transpile a function to GLSL using the main transpiler infrastructure"""
+        from .graph_transpiler import GraphTranspiler
+        from .unified_compiler import UnifiedCompiler
+        
         name = func_metadata['name']
         param_names = func_metadata['param_names']
-        param_types = func_metadata['param_types']
-        return_type = func_metadata['return_type']
+        param_types = func_metadata.get('param_types', {})
+        return_type = func_metadata.get('return_type', 'float')
         ast_node = func_metadata['ast_node']
+        source_code = func_metadata.get('source_code', '')
         
         # Build parameter signature
         param_signature = []
@@ -47,37 +27,76 @@ class ShaderFunctionTranspiler:
             param_type = param_types.get(param, 'float')
             param_signature.append(f"{param_type} {param}")
         
-        # Transpile function body
-        body_code = cls._transpile_function_body(ast_node, param_names, param_types, return_type)
-        
-        # Build function declaration
-        signature = f"{return_type} {name}({', '.join(param_signature)})"
-        glsl_code = f"{signature} {{\n{body_code}\n}}"
-        
-        return glsl_code
+        try:
+            # Get the file path from the original function
+            original_func = func_metadata.get('original_func')
+            file_path = inspect.getfile(original_func) if original_func else "<unknown>"
+            
+            # Create a GraphTranspiler for the function
+            # For functions, we treat all parameters as 'uniform' storage since they're just inputs
+            storage_hints = {param: 'uniform' for param in param_names}
+            
+            # Create a special GraphTranspiler for functions
+            transpiler = FunctionGraphTranspiler(
+                arg_names=param_names,
+                shader_type=ShaderType.COMPUTE,
+                type_hints=param_types,
+                storage_hints=storage_hints,
+                source_code=source_code,
+                function_name=name,
+                file_path=file_path,
+                is_shader_function=True
+            )
+            
+            # Process each statement in the function body
+            for stmt in ast_node.body:
+                transpiler.visit(stmt)
+            
+            graph = transpiler.graph
+            
+            # If there's a return statement but no output variable, set it
+            if graph.output_var is None and return_type != 'void':
+                # Check if the last statement was a return
+                last_stmt = ast_node.body[-1] if ast_node.body else None
+                if isinstance(last_stmt, ast.Return) and last_stmt.value:
+                    # The return value should be in the last operation
+                    if graph.operations:
+                        last_op = graph.operations[-1]
+                        if last_op[0] != 'return' and last_op[2]:  # op_name, inputs, output_var
+                            graph.output_var = last_op[2]
+            
+            # Compile the function graph to GLSL
+            compiler = UnifiedCompiler(
+                graph=graph,
+                shader_type=shader_type,
+                input_types=param_types,
+                explicit_types=transpiler.explicit_types,
+                used_builtins=set(),
+                custom_uniforms={},
+                custom_textures={},
+                is_function=True  # New flag to indicate this is a function compilation
+            )
+            
+            # Generate the function signature and body
+            signature = f"{return_type} {name}({', '.join(param_signature)})"
+            
+            # Get the compiled body from the compiler
+            glsl_body = compiler.compile_function_body()
+            
+            # Build the complete function
+            glsl_code = f"{signature} {{\n{glsl_body}\n}}"
+            
+            return glsl_code
+            
+        except Exception as e:
+            error_info = create_error_context(
+                ast_node, source_code, name, func_metadata.get('file_path', '<unknown>')
+            )
+            error_info.error_message = f"Failed to transpile function {name}: {e}"
+            raise CompilationError(f"Failed to transpile function {name}: {e}", error_info)
     
-    @classmethod
-    def _transpile_function_body(cls, func_def: ast.FunctionDef, param_names: List[str],
-                                param_types: Dict[str, str], return_type: str) -> str:
-        """Transpile function body to GLSL"""
-        transpiler = FunctionBodyTranspiler(param_names, param_types)
-        
-        body_lines = []
-        for stmt in func_def.body:
-            if isinstance(stmt, ast.Return):
-                if stmt.value:
-                    result = transpiler.visit(stmt.value)
-                    body_lines.append(f"\treturn {result};")
-                else:
-                    body_lines.append("\treturn;")
-            elif isinstance(stmt, ast.Expr):
-                result = transpiler.visit(stmt.value)
-                body_lines.append(f"\t{result};")
-        
-        return '\n'.join(body_lines) if body_lines else "\t// Function body"
-    
-    @classmethod
-    def get_all_dependencies(cls, function_name: str) -> Set[str]:
+    @staticmethod
+    def get_all_dependencies(function_name: str) -> Set[str]:
         """Get all functions that a function depends on"""
         visited = set()
         to_visit = [function_name]
@@ -90,15 +109,15 @@ class ShaderFunctionTranspiler:
             visited.add(current)
             func_metadata = FunctionRegistry.get(current)
             if func_metadata and 'ast_node' in func_metadata:
-                calls = cls._find_function_calls(func_metadata['ast_node'])
+                calls = ShaderFunctionTranspiler._find_function_calls(func_metadata['ast_node'])
                 for called_func in calls:
                     if called_func in FunctionRegistry.get_all() and called_func not in visited:
                         to_visit.append(called_func)
         
         return visited
     
-    @classmethod
-    def _find_function_calls(cls, node: ast.AST) -> List[str]:
+    @staticmethod
+    def _find_function_calls(node: ast.AST) -> List[str]:
         """Find all function calls in an AST node"""
         calls = []
         
@@ -106,100 +125,66 @@ class ShaderFunctionTranspiler:
             def visit_Call(self, node):
                 if isinstance(node.func, ast.Name):
                     calls.append(node.func.id)
+                elif isinstance(node.func, ast.Attribute):
+                    # Check if it's a type constructor (vec3, etc.)
+                    if node.func.attr in ['vec2', 'vec3', 'vec4', 'ivec2', 'ivec3', 'ivec4',
+                                         'uvec2', 'uvec3', 'uvec4', 'mat3', 'mat4']:
+                        # These are type constructors, not function calls
+                        pass
+                    else:
+                        # Could be a method call, but we don't support those in functions
+                        pass
                 self.generic_visit(node)
         
         finder = FunctionCallFinder()
         finder.visit(node)
         return calls
 
-class FunctionBodyTranspiler(ast.NodeVisitor):
-    """Simple transpiler for function bodies"""
+class FunctionGraphTranspiler:
+    """Specialized GraphTranspiler for functions that handles function-specific logic"""
     
-    def __init__(self, param_names: List[str], param_types: Dict[str, str]):
-        self.param_names = param_names
-        self.param_types = param_types
-        self.temp_counter = 0
-    
-    def _new_temp(self) -> str:
-        """Create a new temporary variable"""
-        temp = f"_t{self.temp_counter}"
-        self.temp_counter += 1
-        return temp
-    
-    def visit_BinOp(self, node: ast.BinOp) -> str:
-        """Visit binary operation"""
-        left = self.visit(node.left)
-        right = self.visit(node.right)
+    def __init__(self, arg_names: List[str], shader_type: ShaderType = ShaderType.COMPUTE,
+                type_hints: Dict[str, str] = None, storage_hints: Dict[str, str] = None,
+                source_code: str = "", function_name: str = "", file_path: str = "",
+                is_shader_function: bool = True):
         
-        op_map = {
-            ast.Add: '+',
-            ast.Sub: '-',
-            ast.Mult: '*',
-            ast.Div: '/',
-            ast.Pow: '**',
-        }
+        # Import here to avoid circular imports
+        from .graph_transpiler import GraphTranspiler
         
-        op_type = type(node.op)
-        if op_type == ast.Pow:
-            return f"pow({left}, {right})"
-        elif op_type in op_map:
-            return f"({left} {op_map[op_type]} {right})"
+        # Create a regular GraphTranspiler instance
+        self.transpiler = GraphTranspiler(
+            arg_names=arg_names,
+            shader_type=shader_type,
+            type_hints=type_hints,
+            storage_hints=storage_hints,
+            source_code=source_code,
+            function_name=function_name,
+            file_path=file_path,
+            is_shader_function=is_shader_function
+        )
+        
+        # Expose important attributes
+        self.graph = self.transpiler.graph
+        self.explicit_types = self.transpiler.explicit_types
+        self.var_types = self.transpiler.var_types
+        self.var_map = self.transpiler.var_map
+    
+    def visit(self, node):
+        """Delegate to the underlying transpiler"""
+        return self.transpiler.visit(node)
+    
+    def visit_Return(self, node):
+        """Handle return statements specially for functions"""
+        if node.value is None:
+            self.transpiler.graph.set_void_return()
+            # Add a return operation
+            self.transpiler.graph.add_operation('return', [], 
+                                              in_loop=bool(self.transpiler.graph.current_scope))
         else:
-            return f"({left} ? {right})"
-    
-    def visit_UnaryOp(self, node: ast.UnaryOp) -> str:
-        """Visit unary operation"""
-        operand = self.visit(node.operand)
-        
-        op_map = {
-            ast.USub: '-',
-            ast.UAdd: '+',
-        }
-        
-        op_type = type(node.op)
-        if op_type in op_map:
-            return f"{op_map[op_type]}{operand}"
-        else:
-            return f"?{operand}"
-    
-    def visit_Call(self, node: ast.Call) -> str:
-        """Visit function call"""
-        if isinstance(node.func, ast.Name):
-            func_name = node.func.id
-        elif isinstance(node.func, ast.Attribute):
-            func_name = node.func.attr
-        else:
-            return f"/* unsupported call */"
-        
-        args = [self.visit(arg) for arg in node.args]
-        
-        # Check if it's a type constructor
-        from .gl_typing import GLSL_TYPE_CONSTRUCTORS
-        if func_name in GLSL_TYPE_CONSTRUCTORS:
-            return f"{func_name}({', '.join(args)})"
-        
-        return f"{func_name}({', '.join(args)})"
-    
-    def visit_Name(self, node: ast.Name) -> str:
-        """Visit variable name"""
-        return node.id
-    
-    def visit_Constant(self, node: ast.Constant) -> str:
-        """Visit constant value"""
-        if node.value is True:
-            return "true"
-        elif node.value is False:
-            return "false"
-        elif node.value is None:
-            return "0"
-        elif isinstance(node.value, (int, float)):
-            if isinstance(node.value, float):
-                return str(node.value)
-            else:
-                return str(node.value)
-        else:
-            return f'"{node.value}"'
-    
-    def generic_visit(self, node: ast.AST) -> str:
-        """Default visitor"""
-        return f"/* {type(node).__name__} */"
+            # Visit the return value
+            result = self.transpiler.visit(node.value)
+            self.transpiler.graph.set_output(result)
+            
+            # Also add a return operation with the result
+            self.transpiler.graph.add_operation('return', [result],
+                                              in_loop=bool(self.transpiler.graph.current_scope))
