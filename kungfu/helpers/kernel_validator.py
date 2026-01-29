@@ -1,5 +1,6 @@
 from typing import Dict, List, Set
-from .gl_typing import IOTypes, is_kungfu_builtin
+from .common import is_kungfu_builtin
+from ..gl_typing import IOTypes
 
 class KernelValidator:
     """Validate kernel function signatures and usage"""

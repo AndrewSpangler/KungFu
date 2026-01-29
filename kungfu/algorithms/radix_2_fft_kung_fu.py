@@ -8,7 +8,7 @@ from panda3d.core import (
     GraphicsPipeSelection, FrameBufferProperties,
     WindowProperties, GraphicsPipe, Vec2
 )
-from gpu_math import (
+from kungfu import (
     GPUMath,
     gpu_kernel,
     inline_always,

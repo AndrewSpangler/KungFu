@@ -14,6 +14,7 @@ class ComputeGraph:
         self.current_scope = []
         self.static_constants = []  # List of (name, type, size, values) tuples
         self.var_types = {}
+        self.vectorized = None  # Whether this kernel uses vectorized execution
 
     def add_operation(self, op_name: str, inputs: List[str], output_var: str = None, in_loop: bool = False):
         if output_var is None:
@@ -103,6 +104,6 @@ class ComputeGraph:
         self.static_constants.append((name, glsl_type, size, values))
     def optimize_temporaries(self):
         """Optimize the graph by eliminating unnecessary temporary variables"""
-        # This is a placeholder - the actual optimization is done in ShaderCompiler
-        # But we can do some basic optimizations here if needed later
+        # Placeholder - actual optimization in ShaderCompiler
+        # Can do some basic optimizations here later
         pass
