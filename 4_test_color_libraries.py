@@ -20,11 +20,24 @@ engine.import_file("./shader_libraries/colors.py")
 def vertex_shader():
     gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex
 
-@engine.shader('fragment', uniforms={'mode': ('uint', 'readonly'), 'time': ('float', 'readonly')})
+@engine.shader( 'fragment',
+    uniforms={
+        'mode':         ('uint',    'readonly'),
+        'time':         ('float',   'readonly'),
+        'resolution':   ('vec3',    'readonly'),
+        'mouse':        ('vec4',    'readonly'),
+})
 def fragment_shader():
-    uv_x = gl_FragCoord.x / 600.0
-    uv_y = gl_FragCoord.y / 600.0
+    uv_x = gl_FragCoord.x / resolution.x
+    uv_y = gl_FragCoord.y / resolution.y
     
+    if dist(
+        uv_x - (mouse.x / resolution.x),
+        uv_y - (mouse.y / resolution.y)
+    ) < 0.01: # Mouse circle
+        p3d_FragColor = vec4(0.0, 0.0, 1.0, 1.0)
+        return
+
     # Animated points
     t = time * 0.5
     point1_x = 0.5 + 0.3 * sin(t)
@@ -133,12 +146,14 @@ def fragment_shader():
         
     p3d_FragColor = vec4(result.r, result.g, result.b, 1.0)
 
-# Compile shaders
-vertex, vertex_info = engine.compile_shader(vertex_shader)
-fragment, fragment_info = engine.compile_shader(fragment_shader, debug=True)
-shader = Shader.make(Shader.SL_GLSL, vertex=vertex, fragment=fragment)
-node.setShader(shader)
+def create_panda_shader(vert, frag) -> Shader:
+    vertex, vertex_info = engine.compile_shader(vert, debug=True)
+    fragment, fragment_info = engine.compile_shader(frag, debug=True)
+    return Shader.make(Shader.SL_GLSL, vertex=vertex, fragment=fragment)
 
+shader = create_panda_shader(vertex_shader, fragment_shader)
+
+node.setShader(shader)
 # Set initial uniform values
 node.setShaderInput("mode", 0)
 node.setShaderInput("time", 0.0)
@@ -179,23 +194,25 @@ mode_count = len(mode_names)
 # Task to update time and mode
 def update_shader(task):
     global current_mode
-    
-    # Update time uniform
+    mouse_node = app.mouseWatcherNode
+    dt = app.taskMgr.globalClock.getDt()
+    w, h = app.win.getXSize(), app.win.getYSize()
+    node.setShaderInput("resolution", Vec3(w, h, 1.0))
     node.setShaderInput("time", task.time)
+    node.setShaderInput("mode", current_mode)
+
+    if mouse_node and mouse_node.hasMouse():
+        x = mouse_node.getMouseX()
+        y = mouse_node.getMouseY()
+        px, py = (x + 1) * 0.5 * w, (y + 1) * 0.5 * h
+        node.setShaderInput("mouse", Vec4(px, py, 0, 0))
+    else:
+        node.setShaderInput("mouse", Vec4(w/2, h/2, 0, 0))
     
-    # Check for key presses to change mode
-    if app.mouseWatcherNode.is_button_down('space'):
-        current_mode = (current_mode + 1) % mode_count
-        node.setShaderInput("mode", current_mode)
-        
-        # Update text display
-        text_node.setText(f"Mode {current_mode}: {mode_names[current_mode]}")
-        
-        # Wait a bit before allowing another mode change
-        taskMgr.doMethodLater(0.3, lambda task: None, 'mode_delay')
-    
-    # Also change mode automatically every 5 seconds
-    if int(task.time) % 0.5 == 0 and int(task.time) != int(task.time - app.taskMgr.globalClock.getDt()):
+    if (
+        int(task.time) % 1 == 0
+        and int(task.time) != int(task.time - dt)
+    ):
         current_mode = (current_mode + 1) % mode_count
         node.setShaderInput("mode", current_mode)
         text_node.setText(f"Mode {current_mode}: {mode_names[current_mode]}")
