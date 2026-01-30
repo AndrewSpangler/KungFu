@@ -25,6 +25,9 @@ from .gl_typing import (
 from .shader_functions import ShaderFunctionTranspiler
 from .module_loader import ModuleLoader, import_file
 
+from .panda_helpers import load_texture, load_texture_from_array
+from .helpers.common import print_with_line_numbers
+
 class GPUMath:
     def __init__(self, base, headless=False):
         self.base = base
@@ -53,6 +56,9 @@ class GPUMath:
 
         if headless:
             self._setup_headless()
+
+        self.load_texture = load_texture
+        self.load_texture_from_array = load_texture_from_array
 
     def import_file(self, filepath: str, **kwargs) -> 'ModuleType':
         return self.module_loader.import_file(filepath, extra_modules=kwargs)
@@ -318,7 +324,7 @@ class GPUMath:
             except Exception as e:
                 if debug:
                     print("Shader execution error:", e)
-                    print(self.code_cache[cache_key])
+                    print_with_line_numbers(self.code_cache[cache_key])
                 raise
             
             if res_type == 'void':
@@ -405,7 +411,7 @@ class GPUMath:
         fb_prop = FrameBufferProperties()
         win_prop = WindowProperties.size(1, 1)
         self.base.win = self.base.graphics_engine.make_output(
-            pipe, "math_headless", 0, fb_prop, win_prop, GraphicsPipe.BF_refuse_window
+            pipe, "headless", 0, fb_prop, win_prop, GraphicsPipe.BF_refuse_window
         )
     
     def shader(self, shader_type: str, uniforms : Dict = None):
@@ -458,7 +464,7 @@ class GPUMath:
         
         if debug and shader_code:
             print(f"Generated {shader_info.get('type', 'unknown')} shader code:")
-            print(shader_code)
+            print_with_line_numbers(shader_code)
             print("-" * 60)
         
         return shader_code, shader_info

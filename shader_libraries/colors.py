@@ -312,22 +312,6 @@ def invert(color: kf.GLTypes.vec3) -> kf.GLTypes.vec3:
     'blend': kf.GLTypes.vec3,
     'opacity': kf.GLTypes.float
 }, return_type=kf.GLTypes.vec3)
-def blend_multiply(
-    base: kf.GLTypes.vec3,
-    blend: kf.GLTypes.vec3,
-    opacity: kf.GLTypes.float
-) -> kf.GLTypes.vec3:
-    """Multiply blend mode"""
-    prod : vec3 = base * blend
-    result : vec3 = mix(base, prod, opacity)
-    return result
-
-
-@engine.function({
-    'base': kf.GLTypes.vec3,
-    'blend': kf.GLTypes.vec3,
-    'opacity': kf.GLTypes.float
-}, return_type=kf.GLTypes.vec3)
 def blend_add(
     base: kf.GLTypes.vec3,
     blend: kf.GLTypes.vec3,
@@ -491,5 +475,3 @@ def gradient_3_colors(
         return mix(c1, c2, t * 2.0)
     else:
         return mix(c2, c3, (t - 0.5) * 2.0)
-
-print(__package__)

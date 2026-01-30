@@ -1,9 +1,14 @@
 from direct.showbase.ShowBase import ShowBase
-from panda3d.core import CardMaker, Shader, TextNode, Vec4, Vec3
+from panda3d.core import CardMaker, Shader, TextNode, Vec4, Vec3, WindowProperties
 import kungfu as kf
+from kungfu.gl_typing import TextureFilter, WrapMode
 import math
 
 app = ShowBase()
+props = WindowProperties()
+props.setCursorHidden(True)
+app.win.requestProperties(props)
+
 engine = kf.GPUMath(app)
 
 # Create a full-screen card
@@ -16,26 +21,55 @@ node.setPos(0, 0, 0)
 engine.import_file("./shader_libraries/math.py") 
 engine.import_file("./shader_libraries/colors.py") 
 
+@engine.function({
+    'mouse'         : kf.GLTypes.vec4,
+    'resolution'    : kf.GLTypes.vec3,
+    'mouse_texture' : kf.GLTypes.sampler2D,
+    'uv_x'          : kf.GLTypes.float,
+    'uv_y'          : kf.GLTypes.float,
+}, return_type=kf.GLTypes.vec4)
+def draw_mouse(
+    mouse           : kf.GLTypes.vec4,
+    resolution      : kf.GLTypes.vec3,
+    mouse_texture   : kf.GLTypes.sampler2D,
+    uv_x            : kf.GLTypes.float,
+    uv_y            : kf.GLTypes.float
+) -> kf.GLTypes.vec3:
+    mouse_uv_x = mouse.x / resolution.x
+    mouse_uv_y = mouse.y / resolution.y
+    cursor_size = 0.04
+
+    # Calculate offset from mouse position
+    offset_x = ((uv_x - mouse_uv_x) / cursor_size)
+    offset_y = (uv_y - mouse_uv_y) / cursor_size + 1
+    
+    result : vec4 = vec4(-1.0, -1.0, -1.0, -1.0)
+    # Check if we're within the cursor bounds
+    if offset_x >= 0.0 and offset_x <= 1.0 and offset_y >= 0.0 and offset_y <= 1.0:
+        # Sample the cursor texture
+        result: vec4 = texture(mouse_texture, vec2(offset_x, offset_y))
+
+    return result
+
+    
 @engine.shader('vertex')
 def vertex_shader():
     gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex
 
-@engine.shader( 'fragment',
-    uniforms={
-        'mode':         ('uint',    'readonly'),
-        'time':         ('float',   'readonly'),
-        'resolution':   ('vec3',    'readonly'),
-        'mouse':        ('vec4',    'readonly'),
+@engine.shader('fragment', {
+    'mode'          : ('uint',      'readonly'),
+    'time'          : ('float',     'readonly'),
+    'resolution'    : ('vec3',      'readonly'),
+    'mouse'         : ('vec4',      'readonly'),
+    'mouse_texture' : ('sampler2D', 'readonly')
 })
 def fragment_shader():
     uv_x = gl_FragCoord.x / resolution.x
     uv_y = gl_FragCoord.y / resolution.y
     
-    if dist(
-        uv_x - (mouse.x / resolution.x),
-        uv_y - (mouse.y / resolution.y)
-    ) < 0.01: # Mouse circle
-        p3d_FragColor = vec4(0.0, 0.0, 1.0, 1.0)
+    cursor_color: vec4 = draw_mouse(mouse, resolution, mouse_texture, uv_x, uv_y)
+    if cursor_color.a > 0.00001:
+        p3d_FragColor = cursor_color
         return
 
     # Animated points
@@ -153,10 +187,19 @@ def create_panda_shader(vert, frag) -> Shader:
 
 shader = create_panda_shader(vertex_shader, fragment_shader)
 
+mouse_texture = engine.load_texture(
+    "cursor.png",
+    min_filter  = TextureFilter.linear,
+    max_filter  = TextureFilter.linear,
+    wrap_u      = WrapMode.clamp,
+    wrap_v      = WrapMode.clamp
+)
+
 node.setShader(shader)
 # Set initial uniform values
 node.setShaderInput("mode", 0)
 node.setShaderInput("time", 0.0)
+node.setShaderInput("mouse_texture", mouse_texture)
 
 # Create text node to display current mode
 mode_names = [

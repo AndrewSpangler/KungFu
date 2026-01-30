@@ -76,3 +76,16 @@ def get_kungfu_builtin_glsl(var_name: str) -> str:
         'global_idx': 'gid',  # For 1D kernels, global_idx is just gid
     }
     return mappings.get(var_name, var_name)
+
+
+def print_with_line_numbers(content):
+    contents = content.splitlines()
+    indents = 1
+    count = len(contents)
+    while count > 10:
+        count = count // 10
+        indents += 1
+
+    for i in range(len(contents)):
+        idx_len = len(str(i))
+        print(f"{i}{' ' * (indents-idx_len)}: {contents[i]}")

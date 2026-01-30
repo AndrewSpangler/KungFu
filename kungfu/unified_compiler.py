@@ -332,6 +332,13 @@ class UnifiedCompiler:
         if op_name in GLSL_CONSTRUCTORS:
             return op_name
         
+        # Handle texture functions - they always return vec4
+        if op_name in ['texture', 'texture2D', 'textureCube', 'textureLod', 'textureProj', 
+                      'texelFetch', 'texelFetchOffset', 'textureGrad', 'textureGradOffset',
+                      'textureLodOffset', 'textureOffset', 'textureProjGrad', 'textureProjGradOffset',
+                      'textureProjLod', 'textureProjLodOffset', 'textureProjOffset']:
+            return 'vec4'
+        
         # Handle function calls - get return type from function registry
         if op_name == 'function_call' and input_vars:
             func_name = input_vars[0]

@@ -12,6 +12,11 @@ from .shader_inputs import ShaderInputManager
 from .function_registry import FunctionRegistry
 from .shader_functions import ShaderFunctionTranspiler
 from .graph_compiler import function
+from .panda_helpers import (
+    load_texture,
+    load_texture_from_array,
+    prepare_texture
+)
 
 from .gl_typing import (
     Vec_GLTypes, NP_GLTypes, IOTypes, GLTypes, 
