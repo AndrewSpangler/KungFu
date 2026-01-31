@@ -861,14 +861,18 @@ class UnifiedCompiler:
         """Process a single operation"""
         indent = "\t" * indent_level
         
-        # Handle return statements first
+        # Handle return statements
         if op_name == 'return':
-            if inputs:
-                # Return with value
-                assignments.append(f"{indent}return {inputs[0]};")
-            else:
-                # Void return
-                assignments.append(f"{indent}return;")
+            # Only generate actual return statements for functions, not for main compute shader
+            if self.is_function:
+                if inputs:
+                    # Return with value
+                    assignments.append(f"{indent}return {inputs[0]};")
+                else:
+                    # Void return
+                    assignments.append(f"{indent}return;")
+            # For compute shaders, return operations just set the output variable
+            # The actual output assignment happens at the end of main()
             return
         
         # Handle assignment to built-in variables
