@@ -383,6 +383,21 @@ class UnifiedCompiler:
             return self._compile_compute()
         else:
             return self._compile_graphics()
+    
+    def _has_return_operation(self, steps: List[Dict]) -> bool:
+        """Recursively check if any step contains a return operation"""
+        for step in steps:
+            if step['type'] == 'operation' and step['op_name'] == 'return':
+                return True
+            elif step['type'] == 'if':
+                if self._has_return_operation(step.get('then_body', [])):
+                    return True
+                if self._has_return_operation(step.get('else_body', [])):
+                    return True
+            elif step['type'] == 'loop':
+                if self._has_return_operation(step.get('body', [])):
+                    return True
+        return False
 
     def compile_function_body(self) -> str:
         """Compile just the function body (for function declarations)"""
@@ -432,8 +447,12 @@ class UnifiedCompiler:
             elif step['type'] == 'if':
                 self._process_loop_step(step, assignments, 1, function_scope_vars)
         
-        # For functions, add a return statement if we have an output
-        if self.graph.output_var and not self.graph.has_void_return:
+        # For functions, add a return statement only if:
+        # 1. We have an output variable
+        # 2. It's not a void return
+        # 3. There's no explicit return operation anywhere in the steps
+        has_explicit_return = self._has_return_operation(self.graph.steps)
+        if self.graph.output_var and not self.graph.has_void_return and not has_explicit_return:
             assignments.append(f"\treturn {self.graph.output_var};")
         
         return '\n'.join(assignments) if assignments else "\t// Empty function body"
@@ -844,7 +863,12 @@ class UnifiedCompiler:
         
         # Handle return statements first
         if op_name == 'return':
-            assignments.append(f"{indent}return;")
+            if inputs:
+                # Return with value
+                assignments.append(f"{indent}return {inputs[0]};")
+            else:
+                # Void return
+                assignments.append(f"{indent}return;")
             return
         
         # Handle assignment to built-in variables

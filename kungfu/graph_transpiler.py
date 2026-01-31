@@ -586,6 +586,9 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
             else:
                 result = self.visit(node.value)
                 self.graph.set_output(result)
+                # Add return operation with the value
+                self.graph.add_operation('return', [result], 
+                                        in_loop=bool(self.graph.current_scope))
         except CompilationError:
             raise
         except Exception as e:
@@ -647,9 +650,20 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
             
             if self.graph.current_scope:
                 parent_scope = self.graph.current_scope[-1]
-                if 'body' not in parent_scope:
-                    parent_scope['body'] = []
-                parent_scope['body'].append(if_step)
+                # Determine which body list to append to based on parent scope type
+                if parent_scope['type'] == 'if':
+                    # We're inside an if's then_body (since we haven't popped from current_scope yet)
+                    parent_scope['then_body'].append(if_step)
+                elif parent_scope['type'] == 'else':
+                    # We're inside an else body
+                    if 'body' not in parent_scope:
+                        parent_scope['body'] = []
+                    parent_scope['body'].append(if_step)
+                else:
+                    # For loops and other scopes
+                    if 'body' not in parent_scope:
+                        parent_scope['body'] = []
+                    parent_scope['body'].append(if_step)
             else:
                 self.graph.steps.append(if_step)
             
