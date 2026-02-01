@@ -408,7 +408,6 @@ def normalize_angle(angle : kf.GLTypes.float) -> kf.GLTypes.float:
     """Normalize angle to [-PI, PI]"""
     PI : float = 3.14159265359
     TWO_PI : float = 6.28318530718
-    # Use modulo approach instead of while loops
     result : float = angle
     # Normalize to [0, TWO_PI]
     result = result - floor(result / TWO_PI) * TWO_PI

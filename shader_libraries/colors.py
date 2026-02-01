@@ -475,3 +475,25 @@ def gradient_3_colors(
         return mix(c1, c2, t * 2.0)
     else:
         return mix(c2, c3, (t - 0.5) * 2.0)
+
+@engine.function({
+    't': kf.GLTypes.float,
+    'c1': kf.GLTypes.vec3,
+    'c2': kf.GLTypes.vec3,
+    'c3': kf.GLTypes.vec3,
+    'c4': kf.GLTypes.vec3
+}, return_type=kf.GLTypes.vec3)
+def gradient_4_colors(
+    t: kf.GLTypes.float,
+    c1: kf.GLTypes.vec3,
+    c2: kf.GLTypes.vec3,
+    c3: kf.GLTypes.vec3,
+    c4: kf.GLTypes.vec3
+) -> kf.GLTypes.vec3:
+    """Interpolate between four colors"""
+    if t < 0.3333:
+        return mix(c1, c2, t * 2.0)
+    elif t < 0.6666:
+        return mix(c2, c3, (t - 0.3333) * 2.0)
+    else:
+        return mix(c3, c4, (t - 0.6666) * 2.0)

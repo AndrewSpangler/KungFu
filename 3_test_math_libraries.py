@@ -352,7 +352,7 @@ def update_shader(task):
     
     # Auto-cycle modes every 5 seconds
     if (
-        int(task.time) % 5 == 0
+        int(task.time) % 1 == 0
         and int(task.time) != int(task.time - dt)
         and task.time > 1.0  # Skip first second
     ):
