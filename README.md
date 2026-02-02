@@ -7,14 +7,18 @@
     - [Kernels](#kernels)
     - [Shaders](#shaders)
     - [Engine Functions](#engine-functions)
+    - [Buffer Scripting](#buffer-scripting)
+        - [Buffer Operations](#buffer-scripting)
 - [Syntax And Typing](#syntax-and-typing)
     - [Common Syntax](#common-sytax)
         - [Annotations](#annotations)
         - [Array Creation](#array-creation)
+    - [GLSL Operations](#glsl-operations)
     - [Builtins](#builtins)
         - [Panda3D Builtins](#panda3d-builtins)
         - [OpenGL Builtins](#opengl-builtins)
         - [KungFu Builtins](#kungfu-builtins)
+    - [String Lib Implementation](#string-lib-implementation)
 - [Libraries](#libraries)
   - [Strings.py Library](#stringspy-library)
     - [Char Handling](#char-handling)
@@ -186,6 +190,86 @@ def custom_position(matrix, position) -> Vec4:
     return vec4(matrix * (2.0 * position)) 
 ```
 
+### Buffer Scripting
+Some basic GPU scripting can also be done without any decorators using some standard operations.
+Standard operations on numpy arrays return a handle that can be fetched to get a value from the gpu. Buffer handles can be passed to subsequent operations for very little penalty, as the buffer is not read back to the CPU between operations. Buffers can also be passed to shaders as inputs with `handle.buffer`. 
+
+#### Buffer Operations
+| Function | Arity | Expression | Input Types | Result Type |
+|----------|-------|------------|-------------|-------------|
+| full | 1 | a | int, uint, float | same as input |
+| neg | 1 | -a | int, uint, float | same as input |
+| square | 1 | a * a | int, uint, float | same as input |
+| is_zero | 1 | a == 0 | int, uint, float | bool |
+| bool | 1 | a != 0 | int, uint, float | bool |
+| bool_not | 1 | !a | bool | bool |
+| add | 2 | a + b | int, uint, float | float if any float, else first input type |
+| add | 3 | a + b + c | int, uint, float | float if any float, else first input type |
+| add | 4 | a + b + c + d | int, uint, float | float if any float, else first input type |
+| sub | 2 | a - b | int, uint, float | float if any float, else first input type |
+| mult | 2 | a * b | int, uint, float | float if any float, else first input type |
+| mult | 3 | a * b * c | int, uint, float | float if any float, else first input type |
+| div | 2 | (b != 0) ? (a / b) : 0 | int, uint, float | float if any float, else first input type |
+| floordiv | 2 | (b != 0) ? int(floor(float(a) / float(b))) : 0 | int, uint, float | int |
+| mod | 2 | (b != 0) ? (a % b) : 0 | int, uint | same as input |
+| avg | 2 | (a + b) / 2.0 | int, uint, float | float |
+| avg | 3 | (a + b + c) / 3.0 | int, uint, float | float |
+| avg | 4 | (a + b + c + d) / 4.0 | int, uint, float | float |
+| and | 2 | a & b | int, uint | same as input |
+| or | 2 | a \| b | int, uint | same as input |
+| xor | 2 | a ^ b | int, uint | same as input |
+| lsh | 2 | a << b | int, uint | same as input |
+| rsh | 2 | a >> b | int, uint | same as input |
+| bitwise_not | 1 | ~a | int, uint | same as input |
+| gt | 2 | a > b | int, uint, float | bool |
+| lt | 2 | a < b | int, uint, float | bool |
+| eq | 2 | a == b | int, uint, float | bool |
+| gte | 2 | a >= b | int, uint, float | bool |
+| lte | 2 | a <= b | int, uint, float | bool |
+| neq | 2 | a != b | int, uint, float | bool |
+| clamp | 3 | clamp(a, b, c) | float | float |
+| sqrt | 1 | sqrt(float(a)) | int, uint, float | float |
+| exp | 1 | exp(float(a)) | int, uint, float | float |
+| log | 1 | log(float(a)) | int, uint, float | float |
+| pow | 2 | pow(float(a), float(b)) | int, uint, float | float |
+| abs | 1 | abs(a) | int, uint, float | same as input |
+| sin | 1 | sin(float(a)) | int, uint, float | float |
+| cos | 1 | cos(float(a)) | int, uint, float | float |
+| tan | 1 | tan(float(a)) | int, uint, float | float |
+| asin | 1 | asin(float(a)) | int, uint, float | float |
+| acos | 1 | acos(float(a)) | int, uint, float | float |
+| atan | 1 | atan(float(a)) | int, uint, float | float |
+| atan | 2 | atan(float(a), float(b)) | int, uint, float | float |
+| floor | 1 | floor(float(a)) | int, uint, float | float |
+| ceil | 1 | ceil(float(a)) | int, uint, float | float |
+| fract | 1 | fract(float(a)) | int, uint, float | float |
+| round | 1 | round(float(a)) | int, uint, float | float |
+| sign | 1 | sign(a) | int, uint, float | same as input |
+| min | 2 | min(a, b) | int, uint, float | float if any float, else first input type |
+| max | 2 | max(a, b) | int, uint, float | float if any float, else first input type |
+| mix | 3 | mix(a, b, c) | float | float |
+| step | 2 | step(a, b) | float | float |
+| smoothstep | 3 | smoothstep(a, b, c) | float | float |
+| cmul_real | 4 | (a * c) - (b * d) | float | float |
+| cmul_imag | 4 | (a * d) + (b * c) | float | float |
+
+```py
+import numpy as np
+import kungfu as kf
+from direct.showbase.ShowBase import ShowBase
+
+app = ShowBase()
+engine = kf.GPUMath(app, headless=False)
+
+vals = np.linspace(0, 1, 1000)
+handle = engine.sin(vals)
+handle = engine.mult(handle, vals)
+handle = engine.add(handle, vals)
+handle = engine.add(handle, 3)
+
+print(engine.fetch(handle))
+```
+
 ## Syntax And Typing
 
 ### Common Syntax
@@ -299,6 +383,10 @@ def func(...):
             value : vec4 = vec4(i * j, i, j, 1)
             vec4_array2d[i][j] = value
 ```
+
+### GLSL Operations
+Most common GLSL operations and overloads are supported.
+    TODO
 
 ### Builtins
 
@@ -513,14 +601,23 @@ These variables can be used in kernels:
 
 
 ### String Lib Implementation
-    TODO
+
+By default, GLSL doesn't support strings or characters out of the box.
+KungFu implents strings through arrays of unsigned integers.
+In order to enable this support, you must import the strings library.
+`engine.import_file("./shader_libraries/strings.py")`
+
+Due to limitations in GLSL, functions must have fixed array size declarations.
+As a result, a max string size must be set, and all strings must allocate an array of that length, regardless of the actual content length. To indicate the end of a string in an array the char `uint(-1) aka uint(0xFFFFFFFF)` is used as a string terminator.
+
+String operations are slow, and inefficient, but are very useful for debug.
 
 ## Libraries
 Below are the current libraries, and their signatures.
 
 These signatures are in a pseudo-code format for easy reference.
 
-See the library files for full decorators / typehinting. 
+See the library files for full decorators / typing.
 
 ### Strings.py Library
 
