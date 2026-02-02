@@ -865,7 +865,7 @@ class UnifiedCompiler:
         if op_name == 'return':
             # Only generate actual return statements for functions, not for main compute shader
             if self.is_function:
-                if inputs:
+                if inputs and len(inputs) > 0 and inputs[0]:
                     # Return with value
                     assignments.append(f"{indent}return {inputs[0]};")
                 else:
@@ -1033,6 +1033,12 @@ class UnifiedCompiler:
         elif output_var and output_var.startswith('_t'):
             # Temporary variable
             out_type = self.infer_type(op_name, inputs)
+            
+            # Handle void functions - they shouldn't create variables
+            if out_type == 'void':
+                assignments.append(f"{indent}{expr};")
+                return
+            
             self.var_types[output_var] = out_type
             
             # Check if this variable needs to be hoisted
@@ -1049,6 +1055,12 @@ class UnifiedCompiler:
         elif output_var:
             # New variable declaration
             out_type = self.infer_type(op_name, inputs)
+            
+            # Handle void functions
+            if out_type == 'void':
+                assignments.append(f"{indent}{expr};")
+                return
+            
             self.var_types[output_var] = out_type
             assignments.append(f"{indent}{out_type} {output_var} = {expr};")
             self.declared_vars.add(output_var)

@@ -166,6 +166,40 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
                 )
 
     def visit_Constant(self, node):
+        # Handle string literals by converting them to uint arrays
+        if isinstance(node.value, str):
+            try:
+                import sys
+                if 'engine' in sys.modules:
+                    engine = sys.modules['engine']
+                    if hasattr(engine, 'encode_string_glsl'):
+                        return engine.encode_string_glsl(node.value)
+                
+                # Fallback: manual encoding
+                encoded_chars = []
+                for char in node.value:
+                    if char == ' ':
+                        encoded_chars.append('uint(0)')
+                    elif 'A' <= char <= 'Z':
+                        encoded_chars.append(f'uint({33 + ord(char) - ord("A")})')
+                    elif 'a' <= char <= 'z':
+                        encoded_chars.append(f'uint({65 + ord(char) - ord("a")})')
+                    elif '0' <= char <= '9':
+                        encoded_chars.append(f'uint({16 + ord(char) - ord("0")})')
+                    else:
+                        encoded_chars.append('uint(0)')
+                
+                while len(encoded_chars) < 255:
+                    encoded_chars.append('uint(0xFFFFFFFF)')
+                
+                return f"uint[255]({', '.join(encoded_chars[:255])})"
+            except Exception:
+                raise self._create_error(
+                    f"String literal '{node.value}' requires string library to be loaded. "
+                    f"Use engine.import_file('path/to/strings.py') first.", 
+                    node
+                )
+        
         return self._visit_constant(node)
 
     def visit_Name(self, node):
@@ -244,11 +278,19 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
         shader_func = FunctionRegistry.get(func_name)
         if shader_func:
             self.called_functions.add(func_name)
+            return_type = shader_func.get('return_type', 'float')
+            
+            # Handle void functions specially - don't create output variable
+            if return_type == 'void':
+                self.graph.add_operation('function_call', [func_name] + args, 
+                                        output_var=None,
+                                        in_loop=bool(self.graph.current_scope))
+                return None  # Return None for void functions
+            
             result = self.graph.add_operation('function_call', [func_name] + args, 
                                             in_loop=bool(self.graph.current_scope))
             self._increment_temp_usage(result)
             # Store the return type of the function
-            return_type = shader_func.get('return_type', 'float')
             self.var_types[result] = return_type
             self.graph.var_types[result] = return_type
             return result
@@ -671,14 +713,9 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
             
             for stmt in node.body:
                 if isinstance(stmt, ast.Return):
-                    # Add explicit return operation
-                    if_step['then_body'].append({
-                        'type': 'operation',
-                        'op_name': 'return',
-                        'inputs': [],
-                        'output_var': None
-                    })
                     if_step['has_return'] = True
+                    # Visit the return statement to properly handle the return value
+                    self.visit(stmt)
                     break  # Stop processing after return
                 else:
                     self.visit(stmt)
@@ -795,6 +832,10 @@ class GraphTranspiler(ASTVisitorBase, ast.NodeVisitor):
                 return
             
             result = self.visit(node.value)
+            
+            # If result is None, it was a void function call, no need to add expression_result
+            if result is None:
+                return
             
             if self.graph.current_scope:
                 self.graph.add_operation('expression_result', [result],

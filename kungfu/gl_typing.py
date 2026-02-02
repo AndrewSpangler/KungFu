@@ -28,6 +28,7 @@ class IOTypes:
     texture = "texture"
 
 class GLTypes:
+    # Basic Types
     float           = "float"
     double          = "double"
     int             = "int"
@@ -43,6 +44,7 @@ class GLTypes:
     ivec2           = "ivec2"
     ivec3           = "ivec3"
     ivec4           = "ivec4"
+    
     # Texture / mats / samplers (no promotion)
     mat             = "mat"
     mat2            = "mat2"
@@ -52,6 +54,31 @@ class GLTypes:
     sampler3D       = "sampler3D "
     samplerCube     = "samplerCube"
     sampler2DShadow = "sampler2DShadow"
+
+    # Array Types
+    float_array         = "float[]"
+    double_array        = "double[]"
+    int_array           = "int[]"
+    uint_array          = "uint[]"
+    bool_array          = "bool[]"
+    void_array          = "void[]"
+    vec2_array          = "vec2[]"
+    vec3_array          = "vec3[]"
+    vec4_array          = "vec4[]"
+    uvec2_array         = "uvec2[]"
+    uvec3_array         = "uvec3[]"
+    uvec4_array         = "uvec4[]"
+    ivec2_array         = "ivec2[]"
+    ivec3_array         = "ivec3[]"
+    ivec4_array         = "ivec4[]"
+    mat_array           = "mat[]"
+    mat2_array          = "mat2[]"
+    mat3_array          = "mat3[]"
+    sampler2D_array       = "sampler2D[]"
+    sampler2DArray_array  = "sampler2DArray[]"
+    sampler3D_array       = "sampler3D[]"
+    samplerCube_array     = "samplerCube[]"
+    sampler2DShadow_array = "sampler2DShadow[]"
 
 GLSL_CONSTRUCTORS = set()
 for attr_name in dir(GLTypes):

@@ -81,11 +81,11 @@ def get_kungfu_builtin_glsl(var_name: str) -> str:
 def print_with_line_numbers(content):
     contents = content.splitlines()
     indents = 1
-    count = len(contents)
+    count = len(contents) + 1
     while count > 10:
         count = count // 10
         indents += 1
 
-    for i in range(len(contents)):
+    for i in range(len(contents)-1):
         idx_len = len(str(i))
-        print(f"{i}{' ' * (indents-idx_len)}: {contents[i]}")
+        print(f"{i + 1}{' ' * (indents-idx_len)}: {contents[i]}")

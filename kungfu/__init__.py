@@ -1,5 +1,5 @@
 from .gpu_math import GPUMath
-
+from .constants import *
 from .cast_buffer import CastBuffer
 from .graph_compiler import (
     gpu_kernel, inline_always, static_constant,
