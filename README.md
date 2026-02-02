@@ -46,16 +46,18 @@
 
 ## Usage
 
-KungFU has two usage modes:
+KungFu has three usage modes:
 
-- Kernels
+- [Kernels](#kernels)
     - Kernels are compute shaders used for general computations.
     - Kernels produce shader buffers that can be passed to other kernels to chain computations without reading back to the CPU. 
     - Kernels perform vectorized operations on shader buffers, and are best used for parallelized operations.
-- Shaders
+- [Shaders](#shaders)
     - Shaders are primarily used for graphics
     - Vertex, fragment, geometry, and compute shaders are supported.
     - Compute shaders can be used to make highly customized kernels, as well as be integrated with graphics chains.
+- [Buffer Scripting](#buffer-scripting)
+    - Pre-made kernels for performing GPU operations on data in a numpy-like python script, without reading back to the CPU in between operations.
 
 ### Kernels
 
