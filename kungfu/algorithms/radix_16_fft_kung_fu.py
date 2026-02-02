@@ -1,33 +1,14 @@
 import numpy as np
-import time
-import math
-import textwrap
-from panda3d.core import (
-    NodePath, Shader, ShaderAttrib, ShaderBuffer, 
-    GeomEnums, ComputeNode, load_prc_file_data,
-    GraphicsPipeSelection, FrameBufferProperties,
-    WindowProperties, GraphicsPipe, Vec2
-)
-from kungfu import (
-    GPUMath,
-    gpu_kernel,
-    inline_always,
-    CastBuffer,
-    static_constant,
-    NP_GLTypes,
-    Vec_GLTypes,
-    GLTypes,
-    IOTypes
-)
+import kungfu as kf
 
-@gpu_kernel({
-    "data_in"   :    (Vec_GLTypes.vec2, IOTypes.array),
-    "data_out"  :    (Vec_GLTypes.vec2, IOTypes.array),
-    "nItems"    :    (NP_GLTypes.uint,  IOTypes.uniform),
-    "L"         :    (NP_GLTypes.uint,  IOTypes.uniform),
-    "inverse"   :    (NP_GLTypes.int,   IOTypes.uniform),
+@kf.gpu_kernel({
+    "data_in"   :    (kf.Vec_GLTypes.vec2, kf.IOTypes.array),
+    "data_out"  :    (kf.Vec_GLTypes.vec2, kf.IOTypes.array),
+    "nItems"    :    (kf.NP_GLTypes.uint,  kf.IOTypes.uniform),
+    "L"         :    (kf.NP_GLTypes.uint,  kf.IOTypes.uniform),
+    "inverse"   :    (kf.NP_GLTypes.int,   kf.IOTypes.uniform)
 }) 
-@static_constant(
+@kf.static_constant(
     "W16", "vec2", 16,
     [
         ( 1.0000000,  0.0000000),
@@ -49,12 +30,12 @@ from kungfu import (
     ]
 )
 def butterfly_shader(
-    data_in :   IOTypes.array,
-    data_out:   IOTypes.array,
-    nItems  :   IOTypes.uniform,
-    L       :   IOTypes.uniform,
-    inverse :   IOTypes.uniform
-) -> GLTypes.void:
+    data_in :   kf.IOTypes.array,
+    data_out:   kf.IOTypes.array,
+    nItems  :   kf.IOTypes.uniform,
+    L       :   kf.IOTypes.uniform,
+    inverse :   kf.IOTypes.uniform
+) -> kf.GLTypes.void:
     def cmul(a: vec2, b: vec2) -> vec2:
         return vec2(
             a.x * b.x - a.y * b.y,
@@ -106,12 +87,12 @@ def butterfly_shader(
     data_out[j + 15 * L + base] = y[15]
 
 class Radix16FFT:
-    def __init__(self, math_engine:GPUMath):
+    def __init__(self, math_engine:kf.GPUMath):
         self.engine = math_engine
         self.fft_function = self.engine.compile_fused(butterfly_shader, debug=True)
         
     def fft(self, data, inverse=False):
-        if isinstance(data, CastBuffer):
+        if isinstance(data, kf.CastBuffer):
             buf = data
         else:
             buf = self.engine.push(data)
