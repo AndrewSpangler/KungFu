@@ -142,7 +142,30 @@ result = engine.fetch(handle)
 ```
 
 ### Shaders
-    TODO
+Shaders have their respective GL and Panda3D builtins provided automatically. All types of shaders are built via the same process, they are decorated with `@engine.shader("shader_type")` and then compiled with `engine.compile_shader(decorated_function)`. The compile_shader call returns the shader as a string compatible with Panda3D, and a dictionary of shader metadata. 
+```py
+@engine.shader('vertex')
+def vertex_shader():
+    position: vec4 = p3d_Vertex
+    gl_Position : vec4 = p3d_ModelViewProjectionMatrix * position
+
+@engine.shader('fragment')
+def fragment_shader():
+    p3d_FragColor = vec4(1, 0, 0, 1)
+
+vertex, vertex_info = engine.compile_shader(vertex_shader, debug=True)
+fragment, fragment_info = engine.compile_shader(fragment_shader, debug=True)
+shader = Shader.make(Shader.SL_GLSL, vertex=vertex, fragment=fragment)
+
+node.setShader(shader)
+node.setTransparency(TransparencyAttrib.MAlpha)
+```
+
+There are 4 supported shader types:
+- fragment
+- vertex
+- geometry
+- compute
 
 ### Engine Functions
 Engine functions are shared, reusable calls that will automatically be added to the shader if needed.
@@ -150,7 +173,18 @@ Engine functions are shared, reusable calls that will automatically be added to 
 Once registed with @engine.function() they become available in any @engine.shader().
 
 Support in kernels is partial. There are issues with early return statements in kernels that may not be properly handled yet.
-    TODO
+
+Engine functions are defined very similarly to shaders and kernels.
+
+```py
+@engine.function({
+    'matrix': 'mat4',
+    'position': 'vec4'
+}, return_type='vec4')
+def custom_position(matrix, position) -> Vec4:
+    # Double position
+    return vec4(matrix * (2.0 * position)) 
+```
 
 ## Syntax And Typing
 
@@ -619,7 +653,7 @@ def encode_string_glsl(val: str) -> str:
 
 
 """Engine helpers available with:
-- engine.encode_string_numpy
+- engine.encode_string
 - engine.encode_string_glsl
 """
 ```
