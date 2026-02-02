@@ -190,47 +190,48 @@ def string_compare(str1: f'uint[{255}]', str2: f'uint[{255}]') -> kf.GLTypes.int
 # STRING TRANSFORMATION
 
 @engine.function({
-    'src': f'uint[{255}]',
+    'str_array': f'uint[{255}]',
 }, return_type=f'uint[{255}]')
-def string_to_upper(src: f'uint[{255}]') -> 'void':
+def string_to_upper(str_array: f'uint[{255}]') -> f'uint[{255}]':
     """Convert string to uppercase"""
-    length = string_length(src)
+    length = string_length(str_array)
     out : uint[255]
     for i in range(255):
         if i >= length:
             out[i] = uint(0xFFFFFFFF)
         else:
-            out[i] = to_upper(src[i])
+            out[i] = to_upper(str_array[i])
     return out
 
 
 @engine.function({
-    'src': f'uint[{255}]',
+    'str_array': f'uint[{255}]',
 }, return_type=f'uint[{255}]')
-def string_to_lower(src: f'uint[{255}]') -> 'void':
+def string_to_lower(str_array: f'uint[{255}]') -> 'void':
     """Convert string to lowercase"""
-    length = string_length(src)
+    length = string_length(str_array)
     out : uint[255]
     for i in range(255):
         if i >= length:
             out[i] = uint(0xFFFFFFFF)
         else:
-            out[i] = to_lower(src[i])
+            out[i] = to_lower(str_array[i])
     return out
 
 
 @engine.function({
-    'src': f'uint[{255}]',
-    'dst': f'uint[{255}]'
-}, return_type='void')
-def string_reverse(src: f'uint[{255}]', dst: f'uint[{255}]') -> 'void':
+    'str_array': f'uint[{255}]',
+}, return_type=f'uint[{255}]')
+def string_reverse(str_array: f'uint[{255}]') -> f'uint[{255}]':
     """Reverse a string"""
-    length = string_length(src)
+    length = string_length(str_array)
+    out : uint[255]
     for i in range(255):
         if i < length:
-            dst[i] = src[length - uint(1) - i]
+            out[i] = str_array[length - uint(1) - i]
         else:
-            dst[i] = uint(0xFFFFFFFF)
+            out[i] = uint(0xFFFFFFFF)
+    return out
 
 
 # ============================================================================
@@ -238,32 +239,32 @@ def string_reverse(src: f'uint[{255}]', dst: f'uint[{255}]') -> 'void':
 
 @engine.function({
     'str_array': f'uint[{255}]',
-    'ch': kf.GLTypes.uint
+    'char_code': kf.GLTypes.uint
 }, return_type=kf.GLTypes.uint)
-def string_find(str_array: f'uint[{255}]', ch: kf.GLTypes.uint) -> kf.GLTypes.uint:
+def string_find(str_array: f'uint[{255}]', char_code: kf.GLTypes.uint) -> kf.GLTypes.uint:
     """Find first occurrence of character. Returns index or max uint if not found"""
     length = string_length(str_array)
     for i in range(255):
         if i >= length:
-            break
-        if str_array[i] == ch:
+            return uint(0xFFFFFFFF)
+        if str_array[i] == char_code:
             return i
     return uint(0xFFFFFFFF)
 
 
 @engine.function({
     'str_array': f'uint[{255}]',
-    'ch': kf.GLTypes.uint
+    'char_code': kf.GLTypes.uint
 }, return_type=kf.GLTypes.uint)
-def string_rfind(str_array: f'uint[{255}]', ch: kf.GLTypes.uint) -> kf.GLTypes.uint:
+def string_rfind(str_array: f'uint[{255}]', char_code: kf.GLTypes.uint) -> kf.GLTypes.uint:
     """Find last occurrence of character. Returns index or max uint if not found"""
     length = string_length(str_array)
     result : uint = uint(0xFFFFFFFF)
     
     for i in range(255):
         if i >= length:
-            break
-        if str_array[i] == ch:
+            return uint(0xFFFFFFFF)
+        if str_array[i] == chaar:
             result = i
     
     return result
@@ -271,17 +272,17 @@ def string_rfind(str_array: f'uint[{255}]', ch: kf.GLTypes.uint) -> kf.GLTypes.u
 
 @engine.function({
     'str_array': f'uint[{255}]',
-    'ch': kf.GLTypes.uint
+    'char_code': kf.GLTypes.uint
 }, return_type=kf.GLTypes.uint)
-def string_count(str_array: f'uint[{255}]', ch: kf.GLTypes.uint) -> kf.GLTypes.uint:
-    """Count occurrences of character"""
+def string_count(str_array: f'uint[{255}]', char_code: kf.GLTypes.uint) -> kf.GLTypes.uint:
+    """Count occurrences of char_codeacter"""
     length = string_length(str_array)
     count : uint = uint(0)
     
     for i in range(255):
         if i >= length:
-            break
-        if str_array[i] == ch:
+            return count
+        if str_array[i] == char_code:
             count = count + uint(1)
     
     return count
@@ -292,11 +293,11 @@ def string_count(str_array: f'uint[{255}]', ch: kf.GLTypes.uint) -> kf.GLTypes.u
 
 @engine.function({
     'str_array': f'uint[{255}]',
-    'old_ch': kf.GLTypes.uint,
-    'new_ch': kf.GLTypes.uint
+    'old_char_code': kf.GLTypes.uint,
+    'new_char_code': kf.GLTypes.uint
 }, return_type=f'uint[{255}]')
-def string_replace_char(str_array: f'uint[{255}]', old_ch: kf.GLTypes.uint, new_ch: kf.GLTypes.uint) -> 'void':
-    """Replace all occurrences of old_ch with new_ch"""
+def string_replace_char(str_array: f'uint[{255}]', old_char_code: kf.GLTypes.uint, new_char_code: kf.GLTypes.uint) -> 'void':
+    """Replace all occurrences of old_char_code with new_char_code"""
     length = string_length(str_array)
     out : uint[255]
     
@@ -304,8 +305,8 @@ def string_replace_char(str_array: f'uint[{255}]', old_ch: kf.GLTypes.uint, new_
         if i >= length:
             out[i] = uint(0xFFFFFFFF)
         else:
-            if str_array[i] == old_ch:
-                out[i] = new_ch
+            if str_array[i] == old_char_code:
+                out[i] = new_char_code
             else:
                 out[i] = str_array[i]
     
@@ -313,32 +314,33 @@ def string_replace_char(str_array: f'uint[{255}]', old_ch: kf.GLTypes.uint, new_
 
 
 @engine.function({
-    'dst': f'uint[{255}]',
-    'src1': f'uint[{255}]',
-    'src2': f'uint[{255}]'
-}, return_type='void')
-def string_concat(dst: f'uint[{255}]', src1: f'uint[{255}]', src2: f'uint[{255}]') -> 'void':
+    'str1': f'uint[{255}]',
+    'str2': f'uint[{255}]'
+}, return_type=f'uint[{255}]')
+def string_concat(str1: f'uint[{255}]', str2: f'uint[{255}]') -> f'uint[{255}]':
     """Concatenate two strings"""
-    len1 = string_length(src1)
-    len2 = string_length(src2)
+    len1 = string_length(str1)
+    len2 = string_length(str2)
     
     idx : uint = uint(0)
-    
+    out : uint[255]
     for i in range(255):
         if i < len1 and idx < 255:
-            dst[idx] = src1[i]
+            out[idx] = str1[i]
             idx = idx + uint(1)
     
     for i in range(255):
         if i < len2 and idx < 255:
-            dst[idx] = src2[i]
+            out[idx] = str2[i]
             idx = idx + uint(1)
     
     if idx < 255:
-        dst[idx] = uint(0xFFFFFFFF)
+        out[idx] = uint(0xFFFFFFFF)
     
     for i in range(idx + 1, 255):
-        dst[i] = uint(0xFFFFFFFF)
+        out[i] = uint(0xFFFFFFFF)
+
+    return out
 
 
 @engine.function({
@@ -352,13 +354,14 @@ def string_substring(str_array: f'uint[{255}]', start: kf.GLTypes.uint, length: 
     out : uint[255]
     
     out_idx : uint = uint(0)
+    found : bool = False
     for i in range(255):
         src_idx : uint = start + i
-        if i < length and src_idx < str_len:
+        if i < length and src_idx < str_len and not found:
             out[out_idx] = str_array[src_idx]
             out_idx = out_idx + uint(1)
         else:
-            break
+            found = True
     
     for i in range(out_idx, 255):
         out[i] = uint(0xFFFFFFFF)
@@ -385,13 +388,11 @@ def string_to_int(str_array: f'uint[{255}]') -> kf.GLTypes.int:
     
     for i in range(255):
         idx : uint = start_idx + i
-        if idx >= length:
-            break
-        
-        ch = str_array[idx]
-        if is_digit(ch):
-            digit = int(ch) - int(16)
-            result = result * int(10) + digit
+        if idx < length:        
+            ch = str_array[idx]
+            if is_digit(ch):
+                digit = int(ch) - int(16)
+                result = result * int(10) + digit
     
     if is_negative:
         result = -result
@@ -444,15 +445,14 @@ def string_to_float(str_array: f'uint[{255}]') -> kf.GLTypes.float:
 
 @engine.function({
     'value': kf.GLTypes.int,
-    'str_array': f'uint[{255}]'
-}, return_type='void')
-def int_to_string(value: kf.GLTypes.int, str_array: f'uint[{255}]') -> 'void':
+}, return_type=f'uint[{255}]')
+def int_to_string(value: kf.GLTypes.int) -> f'uint[{255}]':
     """Convert integer to string"""
     idx : uint = uint(0)
-    
+    out : uint[255]
     if value < int(0):
         if idx < 255:
-            str_array[0] = uint(12)
+            out[0] = uint(12)
             idx = idx + uint(1)
         value = -value
     
@@ -474,28 +474,29 @@ def int_to_string(value: kf.GLTypes.int, str_array: f'uint[{255}]') -> 'void':
         value = value % divisor
         
         if idx < 255:
-            str_array[idx] = uint(16) + uint(digit)
+            out[idx] = uint(16) + uint(digit)
             idx = idx + uint(1)
     
     if idx < 255:
-        str_array[idx] = uint(0xFFFFFFFF)
+        out[idx] = uint(0xFFFFFFFF)
     
     for i in range(idx + 1, 255):
-        str_array[i] = uint(0xFFFFFFFF)
+        out[i] = uint(0xFFFFFFFF)
+
+    return out
 
 
 @engine.function({
     'value': kf.GLTypes.float,
-    'str_array': f'uint[{255}]',
     'precision': kf.GLTypes.uint
-}, return_type='void')
-def float_to_string(value: kf.GLTypes.float, str_array: f'uint[{255}]', precision: kf.GLTypes.uint) -> 'void':
+}, return_type=f'uint[{255}]')
+def float_to_string(value: kf.GLTypes.float, precision: kf.GLTypes.uint) -> f'uint[{255}]':
     """Convert float to string with given precision"""
     idx : uint = uint(0)
-    
+    out : uint[255]
     if value < float(0):
         if idx < 255:
-            str_array[0] = uint(12)
+            out[0] = uint(12)
             idx = idx + uint(1)
         value = -value
     
@@ -518,12 +519,12 @@ def float_to_string(value: kf.GLTypes.float, str_array: f'uint[{255}]', precisio
         int_part = int_part % divisor
         
         if idx < 255:
-            str_array[idx] = uint(16) + uint(digit)
+            out[idx] = uint(16) + uint(digit)
             idx = idx + uint(1)
     
     if precision > uint(0):
         if idx < 255:
-            str_array[idx] = uint(14)
+            out[idx] = uint(14)
             idx = idx + uint(1)
         
         frac_part = value - float(int(value))
@@ -532,14 +533,16 @@ def float_to_string(value: kf.GLTypes.float, str_array: f'uint[{255}]', precisio
             digit = int(frac_part) % int(10)
             
             if idx < 255:
-                str_array[idx] = uint(16) + uint(digit)
+                out[idx] = uint(16) + uint(digit)
                 idx = idx + uint(1)
     
     if idx < 255:
-        str_array[idx] = uint(0xFFFFFFFF)
+        out[idx] = uint(0xFFFFFFFF)
     
     for i in range(idx + 1, 255):
-        str_array[i] = uint(0xFFFFFFFF)
+        out[i] = uint(0xFFFFFFFF)
+
+    return out
 
 
 # ============================================================================
@@ -581,14 +584,13 @@ def string_is_numeric(str_array: f'uint[{255}]') -> kf.GLTypes.bool:
 def string_hash(str_array: f'uint[{255}]') -> kf.GLTypes.uint:
     """Simple string hash function (djb2 algorithm)"""
     length = string_length(str_array)
-    hash : uint = uint(5381)
+    val : uint = uint(5381)
     
     for i in range(255):
-        if i >= length:
-            break
-        hash = ((hash << uint(5)) + hash) + str_array[i]
+        if i < length:
+            val = ((val << uint(5)) + val) + str_array[i]
     
-    return hash
+    return val
 
 # ============================================================================
 # Vertex Text Renderer Helper
@@ -666,7 +668,7 @@ def render_text(
 # ============================================================================
 # CHARACTER ENCODING/HELPER FUNCTIONS
 
-def encode_string_numpy(val: str) -> list:
+def encode_string(val: str) -> list:
     """Helper function to encode strings to a list of integers for Panda3D"""
     result = []
     for char in val:
@@ -697,7 +699,7 @@ def encode_string_glsl(val: str) -> str:
     
     return f"uint[{255}]({', '.join(encoded[:255])})"
 
-engine.encode_string_numpy   = encode_string_numpy
+engine.encode_string   = encode_string
 engine.encode_string_glsl    = encode_string_glsl
 
 engine.STRLIB_CHARS          = CHARS

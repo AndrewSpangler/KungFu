@@ -82,7 +82,6 @@ def render_text_row(
 def vertex_shader():
     gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex
 
-engine.import_file("./shader_libraries/strings.py") 
 @engine.shader('fragment', {
     'time'              : (kf.GLTypes.float,     'readonly'),
     'resolution'        : (kf.GLTypes.vec3,      'readonly'),
@@ -137,9 +136,6 @@ def fragment_shader():
                 char_uvs
             )
 
-            
-    
-
 def create_panda_shader(vert, frag) -> Shader:
     vertex, vertex_info = engine.compile_shader(vert, debug=True)
     fragment, fragment_info = engine.compile_shader(frag, debug=True)
@@ -151,7 +147,7 @@ node.setShader(shader)
 # Set initial uniform values
 node.setShaderInput("mode", 0)
 node.setShaderInput("time", 0.0)
-node.setShaderInput("input_string", engine.encode_string_numpy("Hello World"))
+node.setShaderInput("input_string", engine.encode_string("Hello World"))
 node.setShaderInput("charmap_texture", engine.charmap_texture)
 node.setShaderInput("char_uvs", engine.STRLIB_PACKED_UVS)
 
