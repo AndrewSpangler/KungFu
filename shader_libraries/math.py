@@ -427,7 +427,6 @@ def ease_in_quad(t : kf.GLTypes.float) -> kf.GLTypes.float:
     """Quadratic ease-in"""
     return t * t
 
-
 @engine.function({
     't' : kf.GLTypes.float,
 },  return_type=kf.GLTypes.float)
@@ -512,7 +511,7 @@ def ease_in_out_sine(t : kf.GLTypes.float) -> kf.GLTypes.float:
 
 
 # ============================================================================
-# NOISE & RANDOMNESS
+# NOISE & RNG
 
 @engine.function({
     'x' : kf.GLTypes.float,
