@@ -1,14 +1,16 @@
 # KungFU
 
+> An engine for using writing Python-styled code to generate graphics shaders and using the GPU for general compute. Directly integrated with Panda3D for visualization. Transpiles from annotated Python to GLSL. 
+
 ## Table of Contents
 - [Libraries](#libraries)
-  - [strings.py](#stringspy)
+  - [Strings.py Library](#stringspy)
     - [Char Handling](#char-handling)
     - [String Handling](#string-handling)
     - [Conversion](#conversion)
     - [Fragment Shader Helper](#fragment-shader-helper)
     - [Engine Helpers](#engine-helpers)
-  - [math.py](#mathpy)
+  - [Math.py Library](#mathpy)
     - [Distance and Geometry](#distance-and-geometry)
     - [Bounds Checking](#bounds-checking)
     - [Clamping and Mapping](#clamping-and-mapping)
@@ -18,15 +20,13 @@
     - [Noise and RNG](#noise-and-rng)
     - [SDF Shapes](#sdf-shapes)
     - [Utility Functions](#utility-functions)
-
-
-
-
-
-
-
-
-
+  - [Colors.py Library](#colorspy)
+    - [Color Conversions](#color-conversions)
+    - [Color Adjustments](#color-adjustments)
+    - [Blending](#blending)
+    - [Effects](#effects)
+    - [Color Utils](#color-utils)
+    - [Palettes](#palettes)
 
 
 ## Libraries
@@ -34,7 +34,12 @@ Below are the included libraries, and their signatures.
 These signatures are in a pseudo-code format for easy reference.
 See the library files for full decorators / typehinting. 
 
-### strings.py
+### Strings.py Library
+
+```py
+engine.import_file("./shader_libraries/strings.py")
+```
+
 #### Char handling
 ```py
 def is_whitespace(char_code: uint) -> bool:
@@ -165,7 +170,11 @@ def encode_string_glsl(val: str) -> str:
 """
 ```
 
-### math.py
+### Math.py Library
+
+```py
+engine.import_file("./shader_libraries/math.py")
+```
 
 #### Distance and Geometry
 ```py
@@ -333,4 +342,127 @@ def step_threshold(value: float, threshold: float) -> float:
 
 def approximately_equal(a: float, b: float, tolerance: float) -> bool:
     """Check if two floats are approximately equal"""
+```
+
+### Colors.py Library
+
+```py
+engine.import_file("./shader_libraries/colors.py")
+```
+
+#### Color Conversions
+
+```py
+def grayscale_rgb(r: float, g: float, b: float) -> float:
+    """Convert RGB to grayscale using standard luminance weights"""
+
+def grayscale_rgba(r: float, g: float, b: float, a: float) -> float:
+    """Convert RGBA to grayscale, preserving alpha"""
+
+def grayscale_vec3(color: vec3) -> float:
+    """Convert vec3 color to grayscale"""
+
+def grayscale_vec4(color: vec4) -> float:
+    """Convert vec4 color to grayscale, preserving alpha"""
+
+def rgb_to_hsv(r: float, g: float, b: float) -> vec3:
+    """Convert RGB to HSV. Returns vec3(hue, saturation, value)"""
+
+def rgb_to_hsv_vec3(color: vec3) -> vec3:
+    """Convert vec3 RGB to HSV"""
+
+def hsv_to_rgb(h: float, s: float, v: float) -> vec3:
+    """Convert HSV to RGB. H in [0, 360], S and V in [0, 1]"""
+    
+def hsv_to_rgb_vec3(hsv: vec3) -> vec3:
+    """Convert vec3 HSV to RGB"""
+
+def rgb_to_hsl(r: float, g: float, b: float) -> vec3:
+    """Convert RGB to HSL. Returns vec3(hue, saturation, lightness)"""
+
+def rgb_to_hsl_vec3(color: vec3) -> vec3:
+    """Convert vec3 RGB to HSL"""
+
+def hsl_to_rgb(h: float, s: float, l: float) -> vec3:
+    """Convert HSL to RGB. H in [0, 360], S and L in [0, 1]"""
+
+def hsl_to_rgb_vec3(hsl: vec3) -> vec3:
+    """Convert vec3 HSL to RGB"""
+```
+
+#### Color Adjustments
+
+```py
+def brightness(color: vec3, amount: float) -> vec3:
+    """Adjust brightness by adding amount to each channel"""
+
+def contrast(color: vec3, amount: float) -> vec3:
+    """Adjust contrast. amount = 1.0 is no change, < 1.0 reduces, > 1.0 increases"""
+
+def saturation(color: vec3, amount: float) -> vec3:
+    """Adjust saturation. amount = 1.0 is no change, 0.0 is grayscale"""
+
+def hue_shift(color: vec3, degrees: float) -> vec3:
+    """Shift hue by degrees (0-360)"""
+
+def invert(color: vec3) -> vec3:
+    """Invert color"""
+```
+
+#### Blending
+
+```py
+def blend_add(base: vec3, blend: vec3, opacity: float) -> vec3:
+    """Additive blend mode"""
+
+def blend_subtract(base: vec3, blend: vec3, opacity: float) -> vec3:
+    """Subtractive blend mode"""
+
+def blend_difference(base: vec3, blend: vec3, opacity: float) -> vec3:
+    """Difference blend mode"""
+```
+
+#### Effects
+
+```py
+def sepia(color: vec3) -> vec3:
+    """Apply sepia effect"""
+
+def posterize(color: vec3, threshold: float) -> vec3:
+    """Posterize color to threshold levels"""
+
+def apply_tint(color: vec3, tint: vec3, amount: float) -> vec3:
+    """Apply a tint to the color"""
+```
+
+#### Color Utils
+
+```py
+def luminance(color: vec3) -> float:
+    """Calculate luminance (same as grayscale_vec3)"""
+
+def perceived_brightness(color: vec3) -> float:
+    """Calculate perceived brightness using sRGB weights"""
+
+def color_distance(c1: vec3, c2: vec3) -> float:
+    """Calculate Euclidean distance between two colors"""
+
+def threshold_color(color: vec3, threshold: float) -> vec3:
+    """Threshold color to black or white based on luminance"""
+```
+
+#### Palettes
+
+```py
+def rainbow_gradient(t: float) -> vec3:
+    """Generate rainbow color from t [0, 1]"""
+
+def heat_map(t: float) -> vec3:
+    """Generate heat map color from t [0, 1] (black -> red -> yellow -> white)"""
+
+def gradient_3_colors(t: float, c1: vec3, c2: vec3, c3: vec3) -> vec3:
+    """Interpolate between three colors"""
+
+def gradient_4_colors(t: float, c1: vec3, c2: vec3, c3: vec3, c4: vec3) -> vec3:
+    """Interpolate between four colors"""
 ```
