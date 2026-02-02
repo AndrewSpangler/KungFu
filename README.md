@@ -116,35 +116,19 @@ def render_text(
 #### Engine Helpers    
 ```py
 def encode_string(val: str) -> list:
-    """Helper function to encode strings to a list of integers for Panda3D"""
-    result = []
-    for char in val:
-        if char in CHAR_TO_INDEX:
-            result.append(CHAR_TO_INDEX[char])
-        else:
-            result.append(0)
-    
-    # Pad with -1 (which is 0xFFFFFFFF in two's complement / unsigned interpretation)
-    # This works with Panda3D's C++ backend which uses signed int conversion
-    while len(result) < 255:
-        result.append(-1)
-    
-    return result[:255]
+    """
+    Helper function to encode strings to a list of integers for Panda3D
+    Pads with -1 (which is 0xFFFFFFFF in two's complement / unsigned interpretation)
+    This works with Panda3D's C++ backend which uses signed int conversion
+    """
 
 def encode_string_glsl(val: str) -> str:
     """Helper function to encode strings to GLSL format"""
-    encoded = []
-    for char in val:
-        if char in CHAR_TO_INDEX:
-            encoded.append(f"uint({CHAR_TO_INDEX[char]})")
-        else:
-            encoded.append("uint(0)")
-    
-    while len(encoded) < 255:
-        encoded.append("uint(0xFFFFFFFF)")  # Use hex literal with 'u' suffix
-    
-    return f"uint[{255}]({', '.join(encoded[:255])})"
+
+
+"""Engine helpers available with:
+- engine.encode_string_numpy
+- engine.encode_string_glsl
+"""
 ```
 
-engine.encode_string_numpy
-engine.encode_string_glsl
