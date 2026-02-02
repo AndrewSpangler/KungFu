@@ -142,7 +142,7 @@ result = engine.fetch(handle)
 ### Builtins
     TODO
 
-#### Pand3D Builtins
+#### Panda3D Builtins
     TODO
 
 #### OpenGL Builtins
