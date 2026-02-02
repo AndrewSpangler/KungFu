@@ -25,7 +25,7 @@ class IOTypes:
     buffer  = "buffer"      # Auto-indexed vectorized buffer (element-wise operations)
     array   = "array"       # Non-indexed buffer (manual indexing) - accessible as an array rather than element
     uniform = "uniform"
-    texture = "texture"
+    texture = "texture"     # Not used yet, use uniforms for now
 
 class GLTypes:
     # Basic Types

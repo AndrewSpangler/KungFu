@@ -1,11 +1,16 @@
-# KungFU
+# KungFu
 
-> An engine for writing Python-styled code to generate graphics shaders and using the GPU for general compute. Directly integrated with Panda3D for visualization. Transpiles from annotatedm styled Python to GLSL. 
+> An engine for writing Python-styled code to generate graphics shaders and using the GPU for general compute. Directly integrated with Panda3D for visualization. Transpiles from specially annotated Python to GLSL. 
 
 ## Table of Contents
 - [Usage](#usage)
     - [Kernels](#kernels)
     - [Shaders](#shaders)
+    - [Engine Functions](#engine-functions)
+- [Syntax And Typing](#syntax-and-typing)
+    - [Common Syntax](#common-sytax)
+        - [Annotations](#annotations)
+        - [Array Creation](#array-creation)
     - [Builtins](#builtins)
         - [Panda3D Builtins](#panda3d-builtins)
         - [OpenGL Builtins](#opengl-builtins)
@@ -49,7 +54,7 @@ KungFU has two usage modes:
 
 ### Kernels
 
-> Kernels were designed to handle automatically mapping input buffers by thread index. This allows Shader Buffers 
+> Kernels were designed to handle automatically mapping input buffers by thread index. This allows Shader Buffers to be used very similarly to numpy arrays.
 
 Example of a very basic kernel:
 ```py
@@ -139,17 +144,133 @@ result = engine.fetch(handle)
 ### Shaders
     TODO
 
+### Engine Functions
+Engine functions are shared, reusable calls that will automatically be added to the shader if needed.
+Once registed with @engine.function() they become available in any @engine.shader(). Support in kernels is partial. There are issues with early return statements in kernels that may not be properly handled yet.
+    TODO
+
+## Syntax And Typing
+
+### Common Syntax
+#### Annotations
+
+GLSL is strongly typed and dislikes inferred type casts
+Type annotation is used to provide the tranpiler this information.
+The following types are available, and may be used for both setting variable types and casting. 
+Variables defaut to float if not declared explicitly - this may change in the future as the transpiler's type inferment improves.
+
+```py
+class GLTypes:
+    # Basic Types
+    float           = "float"
+    double          = "double"
+    int             = "int"
+    uint            = "uint"
+    bool            = "bool"
+    void            = "void"
+    vec2            = "vec2"
+    vec3            = "vec3"
+    vec4            = "vec4"
+    uvec2           = "uvec2"
+    uvec3           = "uvec3"
+    uvec4           = "uvec4"
+    ivec2           = "ivec2"
+    ivec3           = "ivec3"
+    ivec4           = "ivec4"
+    
+    # Texture / mats / samplers
+    mat             = "mat"
+    mat2            = "mat2"
+    mat3            = "mat3"
+    sampler2D       = "sampler2D"
+    sampler2DArray  = "sampler2DArray"
+    sampler3D       = "sampler3D "
+    samplerCube     = "samplerCube"
+    sampler2DShadow = "sampler2DShadow"
+
+    # Array Types
+    float_array         = "float[]"
+    double_array        = "double[]"
+    int_array           = "int[]"
+    uint_array          = "uint[]"
+    bool_array          = "bool[]"
+    void_array          = "void[]"
+    vec2_array          = "vec2[]"
+    vec3_array          = "vec3[]"
+    vec4_array          = "vec4[]"
+    uvec2_array         = "uvec2[]"
+    uvec3_array         = "uvec3[]"
+    uvec4_array         = "uvec4[]"
+    ivec2_array         = "ivec2[]"
+    ivec3_array         = "ivec3[]"
+    ivec4_array         = "ivec4[]"
+    mat_array           = "mat[]"
+    mat2_array          = "mat2[]"
+    mat3_array          = "mat3[]"
+    sampler2D_array       = "sampler2D[]"
+    sampler2DArray_array  = "sampler2DArray[]"
+    sampler3D_array       = "sampler3D[]"
+    samplerCube_array     = "samplerCube[]"
+    sampler2DShadow_array = "sampler2DShadow[]"
+```
+
+```py
+@engine.function({...})
+def func(...):
+    # Auto-casts to float
+    val_float_auto = 1.2
+    # Also auto-casts to float
+    val_float_auto_2 = 2 
+
+    # Will generate GLSL: uint(2.2) and end up as 2u in value
+    val_uint : uint = uint(2.2)
+
+    # Type will not be inferred by the transpiler (yet) and try to assign to float
+    val_uint_wrong = uint(2.2) # will error in Panda3D compiler
+
+    # This is not supported by python syntax.
+    val_uint_wrong_2 = 2u # Results in python exception: "invalid decimal litteral"
+
+    # Correct
+    val_vec3 : vec3 = vec3(1,2,3)
+
+    # Wrong (for now, eventually 2-4 dimensional tuples will auto-cast to their vec equivalent)
+    val_vec3_wrong : vec3 = (1,2,3)
+
+    # values can be cast in-line
+    func_output : float = float(call_that_returns_int(float(abc), int(ghi)))
+```
+
+#### Array Creation
+
+KungFu handles array declaration using a special annotation `name : type[count]`.
+
+```py
+@engine.function({...})
+def func(...):
+    array : float[8]
+    array2d : float[8, 8]
+    vec2_array : vec2[8]
+    vec4_array2d : vec4[8, 8]
+
+    # Array assignment is supported
+    for i in range(3):
+        for j in range(4):
+            value : vec4 = vec4(i * j, i, j, 1)
+            vec4_array2d[i][j] = value
+```
+
 ### Builtins
     TODO
-
 #### Panda3D Builtins
     TODO
-
 #### OpenGL Builtins
     TODO
-    
+### String Lib Implementation
+    TODO
+
 ## Libraries
-Below are the included libraries, and their signatures.
+Below are the current libraries, and their signatures.
 These signatures are in a pseudo-code format for easy reference.
 See the library files for full decorators / typehinting. 
 
