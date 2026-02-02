@@ -1,5 +1,7 @@
 # KungFU
 
+[[_TOC_]]
+
 ## Libraries
 ### strings.py
 #### Char handling
