@@ -14,6 +14,7 @@
     - [Builtins](#builtins)
         - [Panda3D Builtins](#panda3d-builtins)
         - [OpenGL Builtins](#opengl-builtins)
+        - [KungFu Builtins](#kungfu-builtins)
 - [Libraries](#libraries)
   - [Strings.py Library](#stringspy-library)
     - [Char Handling](#char-handling)
@@ -70,7 +71,6 @@ engine = kf.GPUMath(base)
     # Or
     #"NAME":(NP_GLTYPE,           IO_TYPE)
     # All IOTypes.buffers must be the same length for a given kernel
-    # Input b
     "a":    (kf.NP_GLTypes.float, kf.IOTypes.buffer),
     "b":    (kf.NP_GLTypes.float, kf.IOTypes.buffer),
     # Res is the return value, automatically created on return statement in kernels 
@@ -261,11 +261,217 @@ def func(...):
 ```
 
 ### Builtins
-    TODO
+
+KungFu supports direct usage of most GL and Panda3D builtins, and defines some aliases for ease of use.
+
 #### Panda3D Builtins
-    TODO
+
+| Built-in Variable | Type | Category |
+|-------------------|------|----------|
+| **Vertex Attributes** |
+| p3d_Vertex | vec4 | Vertex position |
+| p3d_Normal | vec3 | Vertex normal |
+| p3d_Color | vec4 | Vertex color |
+| **Texture Coordinates** |
+| p3d_TexCoord | vec2 | Primary texture coordinate |
+| p3d_TexCoord0 | vec2 | Texture coordinate set 0 |
+| p3d_TexCoord1 | vec2 | Texture coordinate set 1 |
+| p3d_TexCoord2 | vec2 | Texture coordinate set 2 |
+| p3d_TexCoord3 | vec2 | Texture coordinate set 3 |
+| p3d_TexCoord4 | vec2 | Texture coordinate set 4 |
+| p3d_TexCoord5 | vec2 | Texture coordinate set 5 |
+| p3d_TexCoord6 | vec2 | Texture coordinate set 6 |
+| p3d_TexCoord7 | vec2 | Texture coordinate set 7 |
+| **Multi-Texture Coordinates** |
+| p3d_MultiTexCoord0 | vec2 | Multi-texture coordinate 0 |
+| p3d_MultiTexCoord1 | vec2 | Multi-texture coordinate 1 |
+| p3d_MultiTexCoord2 | vec2 | Multi-texture coordinate 2 |
+| p3d_MultiTexCoord3 | vec2 | Multi-texture coordinate 3 |
+| p3d_MultiTexCoord4 | vec2 | Multi-texture coordinate 4 |
+| p3d_MultiTexCoord5 | vec2 | Multi-texture coordinate 5 |
+| p3d_MultiTexCoord6 | vec2 | Multi-texture coordinate 6 |
+| p3d_MultiTexCoord7 | vec2 | Multi-texture coordinate 7 |
+| **Transformation Matrices** |
+| p3d_ModelMatrix | mat4 | Model matrix |
+| p3d_ViewMatrix | mat4 | View matrix |
+| p3d_ProjectionMatrix | mat4 | Projection matrix |
+| p3d_ModelViewMatrix | mat4 | Model-view matrix |
+| p3d_ModelViewProjectionMatrix | mat4 | Model-view-projection matrix |
+| p3d_ModelViewMatrixInverse | mat4 | Inverse model-view matrix |
+| p3d_ModelViewProjectionMatrixInverse | mat4 | Inverse model-view-projection matrix |
+| p3d_NormalMatrix | mat3 | Normal transformation matrix |
+| **Textures** |
+| p3d_Texture0 | sampler2D | Texture sampler 0 |
+| p3d_Texture1 | sampler2D | Texture sampler 1 |
+| p3d_Texture2 | sampler2D | Texture sampler 2 |
+| p3d_Texture3 | sampler2D | Texture sampler 3 |
+| **Fragment Outputs** |
+| p3d_FragColor | vec4 | Fragment color output |
+| p3d_FragData | vec4[] | Fragment data outputs |
+
 #### OpenGL Builtins
-    TODO
+
+These variabels can be used directly in their respective shaders
+
+| Shader Type | Built-in Variable | Type | I/O |
+|-------------|-------------------|------|-----|
+| **Fragment** | gl_FragCoord | vec4 | Input |
+| | gl_FrontFacing | bool | Input |
+| | gl_PointCoord | vec2 | Input |
+| | gl_ClipDistance | float[] | Input |
+| | gl_PrimitiveID | int | Input |
+| | gl_FragColor | vec4 | Output (GLSL < 130) |
+| | gl_FragData | vec4[] | Output (GLSL < 130) |
+| **Vertex** | gl_VertexID | int | Input |
+| | gl_InstanceID | int | Input |
+| | gl_Position | vec4 | Output |
+| | gl_PointSize | float | Output |
+| | gl_ClipDistance | float[] | Output |
+| **Geometry** | gl_PrimitiveIDIn | int | Input |
+| | gl_InvocationID | int | Input |
+| | gl_Position | vec4 | Output |
+| | gl_PointSize | float | Output |
+| | gl_ClipDistance | float[] | Output |
+| | gl_PrimitiveID | int | Output |
+| | gl_Layer | int | Output |
+| | gl_ViewportIndex | int | Output |
+| **Compute** | gl_NumWorkGroups | uvec3 | Input |
+| | gl_WorkGroupID | uvec3 | Input |
+| | gl_LocalInvocationID | uvec3 | Input |
+| | gl_GlobalInvocationID | uvec3 | Input |
+| | gl_LocalInvocationIndex | uint | Input |
+| | gl_WorkGroupSize | uvec3 | Input |
+| | gl_MaxVertexAttribs | int | Constant (3.3) |
+| | gl_MaxVertexOutputComponents | int | Constant (3.3) |
+| | gl_MaxVertexUniformComponents | int | Constant (3.3) |
+| | gl_MaxVertexTextureImageUnits | int | Constant (3.3) |
+| | gl_MaxGeometryInputComponents | int | Constant (3.3) |
+| | gl_MaxGeometryOutputComponents | int | Constant (3.3) |
+| | gl_MaxGeometryUniformComponents | int | Constant (3.3) |
+| | gl_MaxGeometryTextureImageUnits | int | Constant (3.3) |
+| | gl_MaxGeometryOutputVertices | int | Constant (3.3) |
+| | gl_MaxGeometryTotalOutputComponents | int | Constant (3.3) |
+| | gl_MaxGeometryVaryingComponents | int | Constant (3.3) |
+| | gl_MaxFragmentInputComponents | int | Constant (3.3) |
+| | gl_MaxDrawBuffers | int | Constant (3.3) |
+| | gl_MaxFragmentUniformComponents | int | Constant (3.3) |
+| | gl_MaxTextureImageUnits1 | int | Constant (3.3) |
+| | gl_MaxClipDistances | int | Constant (3.3) |
+| | gl_MaxCombinedTextureImageUnits | int | Constant (3.3) |
+| | gl_MaxTessControlInputComponents | int | Constant (4.0) |
+| | gl_MaxTessControlOutputComponents | int | Constant (4.0) |
+| | gl_MaxTessControlUniformComponents | int | Constant (4.0) |
+| | gl_MaxTessControlTextureImageUnits | int | Constant (4.0) |
+| | gl_MaxTessControlTotalOutputComponents | int | Constant (4.0) |
+| | gl_MaxTessEvaluationInputComponents | int | Constant (4.0) |
+| | gl_MaxTessEvaluationOutputComponents | int | Constant (4.0) |
+| | gl_MaxTessEvaluationUniformComponents | int | Constant (4.0) |
+| | gl_MaxTessEvaluationTextureImageUnits | int | Constant (4.0) |
+| | gl_MaxTessPatchComponents | int | Constant (4.0) |
+| | gl_MaxPatchVertices | int | Constant (4.0) |
+| | gl_MaxTessGenLevel | int | Constant (4.0) |
+| | gl_MaxViewports | int | Constant (4.1) |
+| | gl_MaxVertexUniformVectors | int | Constant (4.1) |
+| | gl_MaxFragmentUniformVectors | int | Constant (4.1) |
+| | gl_MaxVaryingVectors | int | Constant (4.1) |
+| | gl_MaxVertexImageUniform | int | Constant (4.2) |
+| | gl_MaxVertexAtomicCounter | int | Constant (4.2) |
+| | gl_MaxVertexAtomicCounterBuffer | int | Constant (4.2) |
+| | gl_MaxTessControlImageUniform | int | Constant (4.2) |
+| | gl_MaxTessControlAtomicCounter | int | Constant (4.2) |
+| | gl_MaxTessControlAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxTessEvaluationImageUniforms | int | Constant (4.2) |
+| | gl_MaxTessEvaluationAtomicCounters | int | Constant (4.2) |
+| | gl_MaxTessEvaluationAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxGeometryImageUniforms | int | Constant (4.2) |
+| | gl_MaxGeometryAtomicCounters | int | Constant (4.2) |
+| | gl_MaxGeometryAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxFragmentImageUniforms | int | Constant (4.2) |
+| | gl_MaxFragmentAtomicCounters | int | Constant (4.2) |
+| | gl_MaxFragmentAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxCombinedImageUniforms | int | Constant (4.2) |
+| | gl_MaxCombinedAtomicCounters | int | Constant (4.2) |
+| | gl_MaxCombinedAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxImageUnits | int | Constant (4.2) |
+| | gl_MaxCombinedImageUnitsAndFragmentOutputs | int | Constant (4.2) |
+| | gl_MaxImageSamples | int | Constant (4.2) |
+| | gl_MaxAtomicCounterBindings | int | Constant (4.2) |
+| | gl_MaxAtomicCounterBufferSize | int | Constant (4.2) |
+| | gl_MinProgramTexelOffset | int | Constant (4.2) |
+| | gl_MaxProgramTexelOffset | int | Constant (4.2) |
+| | gl_MaxVertexAtomicCounters | int | Constant (4.2) |
+| | gl_MaxVertexAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxTessControlImageUniforms | int | Constant (4.2) |
+| | gl_MaxTessControlAtomicCounters | int | Constant (4.2) |
+| | gl_MaxTessControlAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxTessEvaluationImageUniforms | int | Constant (4.2) |
+| | gl_MaxTessEvaluationAtomicCounters | int | Constant (4.2) |
+| | gl_MaxTessEvaluationAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxGeometryImageUniforms | int | Constant (4.2) |
+| | gl_MaxGeometryAtomicCounters | int | Constant (4.2) |
+| | gl_MaxGeometryAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxFragmentImageUniforms | int | Constant (4.2) |
+| | gl_MaxFragmentAtomicCounters | int | Constant (4.2) |
+| | gl_MaxFragmentAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxCombinedImageUniforms | int | Constant (4.2) |
+| | gl_MaxCombinedAtomicCounters | int | Constant (4.2) |
+| | gl_MaxCombinedAtomicCounterBuffers | int | Constant (4.2) |
+| | gl_MaxImageUnits | int | Constant (4.2) |
+| | gl_MaxCombinedImageUnitsAndFragmentOutputs | int | Constant (4.2) |
+| | gl_MaxImageSamples | int | Constant (4.2) |
+| | gl_MaxAtomicCounterBindings | int | Constant (4.2) |
+| | gl_MaxAtomicCounterBufferSize | int | Constant (4.2) |
+| | gl_MinProgramTexelOffset | int | Constant (4.2) |
+| | gl_MaxProgramTexelOffset | int | Constant (4.2) |
+| | gl_MaxComputeWorkGroupCount | ivec3 | Constant (4.3) |
+| | gl_MaxComputeWorkGroupSize | ivec3 | Constant (4.3) |
+| | gl_MaxComputeUniformComponents | int | Constant (4.3) |
+| | gl_MaxComputeTextureImageUnits | int | Constant (4.3) |
+| | gl_MaxComputeImageUniforms | int | Constant (4.3) |
+| | gl_MaxComputeAtomicCounters | int | Constant (4.3) |
+| | gl_MaxComputeAtomicCounterBuffers | int | Constant (4.3) |
+| | gl_MaxTransformFeedbackBuffers | int | Constant (4.4) |
+| | gl_MaxTransformFeedbackInterleavedComponents | int | Constant (4.4) |
+
+#### KungFu Builtins
+
+These variables can be used in kernels:
+
+| Built-in Variable | Type | Description |
+|-------------------|------|-------------|
+| **Global Invocation ID** |
+| gid | uint | Alias for gl_GlobalInvocationID.x |
+| gid_x | uint | Explicit x component access |
+| gid_y | uint | Explicit y component access |
+| gid_z | uint | Explicit z component access |
+| gid_xyz | uvec3 | Full vector |
+| **Work Group ID** |
+| wgid | uvec3 | Alias for gl_WorkGroupID |
+| wgid_x | uint | Work group ID x component |
+| wgid_y | uint | Work group ID y component |
+| wgid_z | uint | Work group ID z component |
+| **Local Invocation ID** |
+| lid | uvec3 | Alias for gl_LocalInvocationID |
+| lid_x | uint | Local invocation ID x component |
+| lid_y | uint | Local invocation ID y component |
+| lid_z | uint | Local invocation ID z component |
+| **Local Invocation Index** |
+| lid_idx | uint | Alias for gl_LocalInvocationIndex |
+| **Work Group Size** |
+| wg_size | uvec3 | Alias for gl_WorkGroupSize |
+| wg_size_x | uint | Work group size x component |
+| wg_size_y | uint | Work group size y component |
+| wg_size_z | uint | Work group size z component |
+| **Number of Work Groups** |
+| num_wg | uvec3 | Alias for gl_NumWorkGroups |
+| num_wg_x | uint | Number of work groups x component |
+| num_wg_y | uint | Number of work groups y component |
+| num_wg_z | uint | Number of work groups z component |
+| **Special KungFu Variables** |
+| n_items | uint | Number of items to process (from uniform) |
+| global_idx | uint | Calculated global index for 1D kernels |
+
+
 ### String Lib Implementation
     TODO
 
