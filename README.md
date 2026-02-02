@@ -194,6 +194,23 @@ def custom_position(matrix, position) -> Vec4:
 Some basic GPU scripting can also be done without any decorators using some standard operations.
 Standard operations on numpy arrays return a handle that can be fetched to get a value from the gpu. Buffer handles can be passed to subsequent operations for very little penalty, as the buffer is not read back to the CPU between operations. Buffers can also be passed to shaders as inputs with `handle.buffer`. 
 
+```py
+import numpy as np
+import kungfu as kf
+from direct.showbase.ShowBase import ShowBase
+
+app = ShowBase()
+engine = kf.GPUMath(app, headless=False)
+
+vals = np.linspace(0, 1, 1000)
+handle = engine.sin(vals)
+handle = engine.mult(handle, vals)
+handle = engine.add(handle, vals)
+handle = engine.add(handle, 3)
+
+print(engine.fetch(handle))
+```
+
 #### Buffer Operations
 | Function | Arity | Expression | Input Types | Result Type |
 |----------|-------|------------|-------------|-------------|
@@ -252,23 +269,6 @@ Standard operations on numpy arrays return a handle that can be fetched to get a
 | smoothstep | 3 | smoothstep(a, b, c) | float | float |
 | cmul_real | 4 | (a * c) - (b * d) | float | float |
 | cmul_imag | 4 | (a * d) + (b * c) | float | float |
-
-```py
-import numpy as np
-import kungfu as kf
-from direct.showbase.ShowBase import ShowBase
-
-app = ShowBase()
-engine = kf.GPUMath(app, headless=False)
-
-vals = np.linspace(0, 1, 1000)
-handle = engine.sin(vals)
-handle = engine.mult(handle, vals)
-handle = engine.add(handle, vals)
-handle = engine.add(handle, 3)
-
-print(engine.fetch(handle))
-```
 
 ## Syntax And Typing
 
@@ -705,7 +705,7 @@ def string_substring(str_array: uint[255], start: uint, length: uint) -> uint[25
 def string_to_int(str_array: uint[255]) -> int:
     """Convert string to integer"""
 
-def string_to_float(string_to_float: uint[255]) -> float:
+def string_to_float(str_array: uint[255]) -> float:
     """Convert string to float"""
 
 def string_is_numeric(str_array: uint[255]) -> bool:
