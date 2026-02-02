@@ -53,7 +53,7 @@ class FFT16Demo(ShowBase):
         out(f"Speedup:   {t_cpu/t_gpu:.2f}x")
         out(f"Max Diff:  {max_diff:.3e}")
         out(f"Mean Diff: {mean_diff:.3e}")
-        out(f"Valid:     {max_diff < 1e-1}")
+        out(f"Valid:     {mean_diff < 1e-3}")
     
         # Inverse FFT
         if test_inverse:
@@ -120,4 +120,4 @@ def benchmark_gpu_avg(count = 1):
     print(f"Speedup: {avg_cpu/avg_gpu:.2f}x")
 
 if __name__ == "__main__":
-    benchmark_gpu_avg(count=1)
+    benchmark_gpu_avg(count=21)

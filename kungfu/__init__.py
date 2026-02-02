@@ -34,8 +34,7 @@ from .helpers import (
     get_shader_version,
     get_builtin_variables
 )
-from .algorithms import Radix16FFT, Radix2FFT
+from .algorithms import Radix16FFT
 
 class ADDONS:
-    Radix2FFT = Radix2FFT
     Radix16FFT = Radix16FFT

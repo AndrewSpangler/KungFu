@@ -202,7 +202,7 @@ import kungfu as kf
 from direct.showbase.ShowBase import ShowBase
 
 app = ShowBase()
-engine = kf.GPUMath(app, headless=False)
+engine = kf.GPUMath(app, headless=True)
 
 vals = np.linspace(0, 1, 1000)
 handle = engine.sin(vals)
