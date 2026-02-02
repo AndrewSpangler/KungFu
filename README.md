@@ -146,7 +146,10 @@ result = engine.fetch(handle)
 
 ### Engine Functions
 Engine functions are shared, reusable calls that will automatically be added to the shader if needed.
-Once registed with @engine.function() they become available in any @engine.shader(). Support in kernels is partial. There are issues with early return statements in kernels that may not be properly handled yet.
+
+Once registed with @engine.function() they become available in any @engine.shader().
+
+Support in kernels is partial. There are issues with early return statements in kernels that may not be properly handled yet.
     TODO
 
 ## Syntax And Typing
@@ -155,9 +158,12 @@ Once registed with @engine.function() they become available in any @engine.shade
 #### Annotations
 
 GLSL is strongly typed and dislikes inferred type casts
+
 Type annotation is used to provide the tranpiler this information.
-The following types are available, and may be used for both setting variable types and casting. 
+
 Variables defaut to float if not declared explicitly - this may change in the future as the transpiler's type inferment improves.
+
+The following types are available, and may be used for both setting variable types and casting. 
 
 ```py
 class GLTypes:
@@ -477,7 +483,9 @@ These variables can be used in kernels:
 
 ## Libraries
 Below are the current libraries, and their signatures.
+
 These signatures are in a pseudo-code format for easy reference.
+
 See the library files for full decorators / typehinting. 
 
 ### Strings.py Library
