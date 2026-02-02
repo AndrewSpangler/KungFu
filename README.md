@@ -1,16 +1,22 @@
 # KungFU
 
-> An engine for using writing Python-styled code to generate graphics shaders and using the GPU for general compute. Directly integrated with Panda3D for visualization. Transpiles from annotated Python to GLSL. 
+> An engine for writing Python-styled code to generate graphics shaders and using the GPU for general compute. Directly integrated with Panda3D for visualization. Transpiles from annotatedm styled Python to GLSL. 
 
 ## Table of Contents
+- [Usage](#usage)
+    - [Kernels](#kernels)
+    - [Shaders](#shaders)
+    - [Builtins](#builtins)
+        - [Panda3D Builtins](#panda3d-builtins)
+        - [OpenGL Builtins](#opengl-builtins)
 - [Libraries](#libraries)
-  - [Strings.py Library](#stringspy)
+  - [Strings.py Library](#stringspy-library)
     - [Char Handling](#char-handling)
     - [String Handling](#string-handling)
     - [Conversion](#conversion)
     - [Fragment Shader Helper](#fragment-shader-helper)
     - [Engine Helpers](#engine-helpers)
-  - [Math.py Library](#mathpy)
+  - [Math.py Library](#mathpy-library)
     - [Distance and Geometry](#distance-and-geometry)
     - [Bounds Checking](#bounds-checking)
     - [Clamping and Mapping](#clamping-and-mapping)
@@ -20,7 +26,7 @@
     - [Noise and RNG](#noise-and-rng)
     - [SDF Shapes](#sdf-shapes)
     - [Utility Functions](#utility-functions)
-  - [Colors.py Library](#colorspy)
+  - [Colors.py Library](#colorspy-library)
     - [Color Conversions](#color-conversions)
     - [Color Adjustments](#color-adjustments)
     - [Blending](#blending)
@@ -28,7 +34,120 @@
     - [Color Utils](#color-utils)
     - [Palettes](#palettes)
 
+## Usage
 
+KungFU has two usage modes:
+
+- Kernels
+    - Kernels are compute shaders used for general computations.
+    - Kernels produce shader buffers that can be passed to other kernels to chain computations without reading back to the CPU. 
+    - Kernels perform vectorized operations on shader buffers, and are best used for parallelized operations.
+- Shaders
+    - Shaders are primarily used for graphics
+    - Vertex, fragment, geometry, and compute shaders are supported.
+    - Compute shaders can be used to make highly customized kernels, as well as be integrated with graphics chains.
+
+### Kernels
+
+> Kernels were designed to handle automatically mapping input buffers by thread index. This allows Shader Buffers 
+
+Example of a very basic kernel:
+```py
+import numpy as np
+import kungfu as kf
+from direct.showbase.ShowBase import ShowBase
+
+base = ShowBase()
+engine = kf.GPUMath(base)
+
+@kf.gpu_kernel({
+    #"NAME":((PY_TYPE, GLSL_TYPE),IO_TYPE))
+    # Or
+    #"NAME":(NP_GLTYPE,           IO_TYPE)
+    # All IOTypes.buffers must be the same length for a given kernel
+    # Input b
+    "a":    (kf.NP_GLTypes.float, kf.IOTypes.buffer),
+    "b":    (kf.NP_GLTypes.float, kf.IOTypes.buffer),
+    # Res is the return value, automatically created on return statement in kernels 
+    "res":  (kf.NP_GLTypes.float, kf.IOTypes.buffer)
+}, vectorized=True)
+def squared_sum(a, b): # You can use type-hints here, however they have no effect on the transpiler.
+    return a*a + b*b
+
+# Transpile to GLSL and wrap the generated shader to it can be called like a function 
+squared_sum_kernel = engine.compile_fused(squared_sum, debug=True)
+
+# Generate some test data
+x = np.random.rand(10000).astype(np.float32)
+y = np.random.rand(10000).astype(np.float32)
+
+# Run kernel, get shader buffer object back
+handle = squared_sum_kernel(x, y)
+# Fetch result from GPU and convert to numpy array type specified in res (kf.NP_GLTypes.float)
+gpu_output = engine.fetch(handle)
+cpu_output = x*x + y*y # Numpy equivalent
+# Set accuracy (GPU is 32 bit)
+cpu_output = cpu_output.astype(np.float32)
+
+# Calulate differences
+abs_diff = np.abs(gpu_output - cpu_output)
+near_zero_mask = np.abs(cpu_output) < 1e-10
+percent_diff = np.zeros_like(gpu_output)
+
+not_near_zero = ~near_zero_mask
+if np.any(not_near_zero):
+    percent_diff[not_near_zero] = 100.0 * abs_diff[not_near_zero] / np.abs(cpu_output[not_near_zero])
+
+if np.any(near_zero_mask):
+    percent_diff[near_zero_mask] = abs_diff[near_zero_mask]
+
+max_percent_diff = np.max(percent_diff)
+max_abs_diff = np.max(abs_diff)
+
+print(f"Maximum absolute difference: {max_abs_diff:.2e}")
+print(f"Maximum percentage difference: {max_percent_diff:.6f}%")
+print(f"Sample GPU output: {gpu_output[:5]}")
+print(f"Sample CPU output: {cpu_output[:5]}")
+```
+
+IOTypes.buffer and IOTypes.array are both shader buffers, however sometimes you want to be able to access the whole buffer rather than one value per thread. Buffers are 1:1 per thread, whereas arrays can be accessed in full. Both can be used in the same kernel:
+
+```py
+@kf.gpu_kernel({
+    "in_buffer": (kf.NP_GLTypes.float, kf.IOTypes.buffer),
+    "in_array":  (kf.NP_GLTypes.float, kf.IOTypes.array),
+    "res":       (kf.NP_GLTypes.float, kf.IOTypes.buffer)
+}, vectorized=True)
+def mixed_type(in_buffer, in_array):
+    # in_buffer is accessed automatically by thread (gidx)
+    # use half of that to sample in_array
+    gidx : uint = gl_GlobalInvocationID.x
+    return in_buffer + in_array[gidx // 2]
+
+# in_array is half the length of in_buffer
+buff = np.random.rand(10000).astype(np.float32)
+arr  = np.random.rand(5000).astype(np.float32)
+
+mixed_type_kernel = engine.compile_fused(mixed_type, debug=True)
+
+handle = mixed_type_kernel(buff, arr)
+result = engine.fetch(handle)
+
+...
+```
+
+### Shaders
+    TODO
+
+### Builtins
+    TODO
+
+#### Pand3D Builtins
+    TODO
+
+#### OpenGL Builtins
+    TODO
+    
 ## Libraries
 Below are the included libraries, and their signatures.
 These signatures are in a pseudo-code format for easy reference.
